@@ -105,6 +105,7 @@ import app.opendocument.core.Odr
 import app.opendocument.core.android.OdrAndroid
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.activity.compose.BackHandler
 
 class MainActivity : ComponentActivity() {
     private val model by viewModels<DocSwipeViewModel>()
@@ -235,6 +236,14 @@ fun DocSwipeApp(model: DocSwipeViewModel) {
     var showPermissionInfo by remember { mutableStateOf(!model.storageGranted) }
     var showHiddenPrompt by remember { mutableStateOf(false) }
     val context = LocalContext.current
+
+    BackHandler(enabled = screen != Screen.HOME) {
+        screen = when (screen) {
+            Screen.DECK, Screen.SETTINGS -> Screen.HOME
+            Screen.REVIEW -> Screen.DECK
+            Screen.HOME -> Screen.HOME
+        }
+    }
 
     LaunchedEffect(model.storageGranted) {
         showPermissionInfo = !model.storageGranted
@@ -745,11 +754,24 @@ private sealed interface PdfLoadResult {
 
 @Composable
 private fun TextPreview(path: String, modifier: Modifier) {
-    val lines = remember(path) { runCatching { File(path).bufferedReader().useLines { it.take(400).toList() } }.getOrElse { listOf("Preview unavailable") } }
+    var lines by remember(path) { mutableStateOf<List<String>?>(null) }
+    LaunchedEffect(path) {
+        lines = withContext(Dispatchers.IO) {
+            runCatching {
+                File(path).inputStream().bufferedReader(Charsets.UTF_8).useLines { it.take(400).toList() }
+            }.getOrElse { listOf("Preview unavailable") }
+        }
+    }
     var scale by remember(path) { mutableFloatStateOf(1f) }
     val transformState = rememberTransformableState { zoomChange, _, _ -> scale = (scale * zoomChange).coerceIn(1f, 3f) }
     Box(modifier.transformable(transformState).graphicsLayer { scaleX = scale; scaleY = scale }) {
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) { items(lines) { Text(it, color = Color(0xFF18221E)) } }
+        if (lines == null) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Loading text…", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        } else {
+            LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                items(lines!!) { Text(it, color = Color(0xFF18221E)) }
+            }
+        }
     }
 }
 

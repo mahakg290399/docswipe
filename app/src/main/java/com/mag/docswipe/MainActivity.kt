@@ -133,6 +133,7 @@ class DocSwipeViewModel(application: android.app.Application) : AndroidViewModel
     var storageGranted by mutableStateOf(Environment.isExternalStorageManager()); private set
     var skippedPrompt by mutableStateOf(false); private set
     private var reviewingSkipped = false
+    private val deferredSkippedIds = mutableSetOf<String>()
 
     fun refresh() { months = db.months(); failed = db.failed() }
 
@@ -159,12 +160,18 @@ class DocSwipeViewModel(application: android.app.Application) : AndroidViewModel
 
     fun openMonth(month: String) {
         reviewingSkipped = false
+        deferredSkippedIds.clear()
         skippedPrompt = false
         deck = db.documents(month)
         if (deck.isEmpty() && db.hasSkipped(month)) skippedPrompt = true
     }
-    fun reviewSkipped(month: String) { reviewingSkipped = true; skippedPrompt = false; deck = db.documents(month, includeSkipped = true) }
-    fun leaveSkipped() { skippedPrompt = false; deck = emptyList() }
+    fun reviewSkipped(month: String) {
+        reviewingSkipped = true
+        deferredSkippedIds.clear()
+        skippedPrompt = false
+        deck = db.documents(month, includeSkipped = true)
+    }
+    fun leaveSkipped() { skippedPrompt = false; deferredSkippedIds.clear(); deck = emptyList() }
     fun stagedCount(month: String): Int = db.staged(month).size
     fun tutorialShown(month: String): Boolean {
         val prefs = getApplication<DocSwipeApplication>().getSharedPreferences("settings", 0)
@@ -176,7 +183,10 @@ class DocSwipeViewModel(application: android.app.Application) : AndroidViewModel
     fun openReview(month: String) { staged = db.staged(month) }
     fun act(doc: Document, action: Triage) {
         db.setStatus(doc.id, action)
+        if (reviewingSkipped && action == Triage.SKIPPED) deferredSkippedIds += doc.id
+        else deferredSkippedIds -= doc.id
         deck = db.documents(doc.month, includeSkipped = reviewingSkipped)
+            .filterNot { it.id in deferredSkippedIds }
         if (deck.isEmpty() && !reviewingSkipped && db.hasSkipped(doc.month)) skippedPrompt = true
         refresh()
     }

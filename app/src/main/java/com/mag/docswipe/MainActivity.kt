@@ -159,8 +159,13 @@ class DocSwipeViewModel(application: android.app.Application) : AndroidViewModel
     fun reviewSkipped(month: String) { reviewingSkipped = true; skippedPrompt = false; deck = db.documents(month, includeSkipped = true) }
     fun leaveSkipped() { skippedPrompt = false; deck = emptyList() }
     fun stagedCount(month: String): Int = db.staged(month).size
-    fun tutorialShown(month: String): Boolean = getApplication<DocSwipeApplication>().getSharedPreferences("settings", 0).getBoolean("tutorial_$month", false)
-    fun markTutorialShown(month: String) { getApplication<DocSwipeApplication>().getSharedPreferences("settings", 0).edit().putBoolean("tutorial_$month", true).apply() }
+    fun tutorialShown(month: String): Boolean {
+        val prefs = getApplication<DocSwipeApplication>().getSharedPreferences("settings", 0)
+        return prefs.getBoolean("tutorial_shown", false) || prefs.all.keys.any { it.startsWith("tutorial_") }
+    }
+    fun markTutorialShown(month: String) {
+        getApplication<DocSwipeApplication>().getSharedPreferences("settings", 0).edit().putBoolean("tutorial_shown", true).apply()
+    }
     fun openReview(month: String) { staged = db.staged(month) }
     fun act(doc: Document, action: Triage) {
         db.setStatus(doc.id, action)

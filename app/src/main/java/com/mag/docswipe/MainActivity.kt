@@ -13,6 +13,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -348,7 +350,20 @@ private fun DeckScreen(model: DocSwipeViewModel, month: String, onBack: () -> Un
     var showTutorial by remember(month) { mutableStateOf(!model.tutorialShown(month)) }
     val totalDocuments = remember(month) { model.deck.size }
     val active = model.deck.firstOrNull()
-    Scaffold(containerColor = MaterialTheme.colorScheme.background, topBar = { TopAppBar(title = { Text(month) }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back") } }, actions = { TextButton(onClick = onReview) { Text("Review") } }) }, bottomBar = {
+    Scaffold(containerColor = MaterialTheme.colorScheme.background, topBar = {
+        Surface(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), color = Color.White, shape = RoundedCornerShape(20.dp), shadowElevation = 3.dp) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back") }
+                Column(Modifier.weight(1f)) {
+                    Text(active?.name ?: month, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
+                    Text("${model.deck.size} of $totalDocuments remaining", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(14.dp)) {
+                    TextButton(onClick = onReview) { Text("Review") }
+                }
+            }
+        }
+    }, bottomBar = {
         Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 8.dp, shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 15.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 ActionButton(Icons.Default.Delete, "Delete", MaterialTheme.colorScheme.error) { active?.let { undo = it; model.act(it, Triage.STAGED_DELETE) } }
@@ -365,7 +380,6 @@ private fun DeckScreen(model: DocSwipeViewModel, month: String, onBack: () -> Un
             }
         }
         else Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp)) {
-            Text("${model.deck.size} of $totalDocuments remaining", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 10.dp, bottom = 8.dp))
             DocumentCard(active, Modifier.weight(1f).fillMaxWidth(), onLeft = { undo = active; model.act(active, Triage.STAGED_DELETE) }, onRight = { undo = active; model.act(active, Triage.KEEP) })
             Spacer(Modifier.height(12.dp))
         }
@@ -406,7 +420,7 @@ private fun ActionButton(icon: androidx.compose.ui.graphics.vector.ImageVector, 
 private fun DocumentCard(document: Document, modifier: Modifier, onLeft: () -> Unit, onRight: () -> Unit) {
     var offset by remember(document.id) { mutableFloatStateOf(0f) }
     val dragState = rememberDraggableState { delta -> offset += delta }
-    Card(modifier
+    Card(colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = Color.White), modifier = modifier
         .graphicsLayer { translationX = offset; rotationZ = offset / 34f }
         .draggable(
             state = dragState,
@@ -477,19 +491,16 @@ private fun TutorialRow(gesture: String, label: String, color: Color, pulse: Flo
 
 @Composable
 private fun DocumentViewer(document: Document, modifier: Modifier) {
-    Column(modifier.padding(16.dp)) {
-        Text(document.name, style = MaterialTheme.typography.titleLarge)
-        Text("${document.extension.uppercase()} · ${formatBytes(document.size)}")
-        Spacer(Modifier.height(12.dp))
+    Surface(modifier = modifier, color = Color.White) {
         when (document.extension) {
-            "pdf" -> PdfPreview(document.path)
-            else -> TextPreview(document.path)
+            "pdf" -> PdfPreview(document.path, Modifier.fillMaxSize().padding(10.dp))
+            else -> TextPreview(document.path, Modifier.fillMaxSize().padding(14.dp))
         }
     }
 }
 
 @Composable
-private fun PdfPreview(path: String) {
+private fun PdfPreview(path: String, modifier: Modifier) {
     var pages by remember(path) { mutableStateOf<List<android.graphics.Bitmap>>(emptyList()) }
     LaunchedEffect(path) {
         pages = withContext(Dispatchers.IO) {
@@ -507,17 +518,30 @@ private fun PdfPreview(path: String) {
             } catch (_: Exception) { emptyList() }
         }
     }
-    if (pages.isEmpty()) Text("Loading PDF preview…") else LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    if (pages.isEmpty()) Text("Loading PDF preview…") else LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         itemsIndexed(pages) { index, page ->
-            Image(page.asImageBitmap(), "PDF page ${index + 1}", Modifier.fillMaxWidth(), contentScale = ContentScale.FillWidth)
+            ZoomablePage(page, index)
         }
     }
 }
 
 @Composable
-private fun TextPreview(path: String) {
+private fun ZoomablePage(page: android.graphics.Bitmap, index: Int) {
+    var scale by remember(index) { mutableFloatStateOf(1f) }
+    val transformState = rememberTransformableState { zoomChange, _, _ -> scale = (scale * zoomChange).coerceIn(1f, 3f) }
+    Surface(Modifier.fillMaxWidth().transformable(transformState).graphicsLayer { scaleX = scale; scaleY = scale }, color = Color.White, shape = RoundedCornerShape(4.dp)) {
+        Image(page.asImageBitmap(), "PDF page ${index + 1}", Modifier.fillMaxWidth(), contentScale = ContentScale.FillWidth)
+    }
+}
+
+@Composable
+private fun TextPreview(path: String, modifier: Modifier) {
     val lines = remember(path) { runCatching { File(path).bufferedReader().useLines { it.take(200).toList() } }.getOrElse { listOf("Preview unavailable") } }
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) { items(lines) { Text(it) } }
+    var scale by remember(path) { mutableFloatStateOf(1f) }
+    val transformState = rememberTransformableState { zoomChange, _, _ -> scale = (scale * zoomChange).coerceIn(1f, 3f) }
+    Box(modifier.transformable(transformState).graphicsLayer { scaleX = scale; scaleY = scale }) {
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) { items(lines) { Text(it, color = Color(0xFF18221E)) } }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

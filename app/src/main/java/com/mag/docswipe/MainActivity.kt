@@ -513,32 +513,22 @@ private fun DocumentViewer(document: Document, modifier: Modifier) {
 
 @Composable
 private fun PdfPreview(path: String, modifier: Modifier) {
-    var pages by remember(path) { mutableStateOf<List<android.graphics.Bitmap>>(emptyList()) }
     var totalPages by remember(path) { mutableStateOf(0) }
     val listState = rememberLazyListState()
     val pull = remember(path) { Animatable(0f) }
     val scope = rememberCoroutineScope()
     val currentPage by remember { derivedStateOf { (listState.firstVisibleItemIndex + 1).coerceAtMost(totalPages.coerceAtLeast(1)) } }
     LaunchedEffect(path) {
-        val loaded = withContext(Dispatchers.IO) {
+        totalPages = withContext(Dispatchers.IO) {
             try {
                 val descriptor = android.os.ParcelFileDescriptor.open(File(path), android.os.ParcelFileDescriptor.MODE_READ_ONLY)
                 val renderer = android.graphics.pdf.PdfRenderer(descriptor)
                 val pageCount = renderer.pageCount
-                val result = (0 until minOf(pageCount, 10)).map { index ->
-                    renderer.openPage(index).let { page ->
-                        val bitmap = android.graphics.Bitmap.createBitmap(page.width, page.height, android.graphics.Bitmap.Config.ARGB_8888)
-                        page.render(bitmap, null, null, android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                        page.close(); bitmap
-                    }
-                }
-                renderer.close(); descriptor.close(); pageCount to result
-            } catch (_: Exception) { 0 to emptyList() }
+                renderer.close(); descriptor.close(); pageCount
+            } catch (_: Exception) { 0 }
         }
-        totalPages = loaded.first
-        pages = loaded.second
     }
-    if (pages.isEmpty()) Text("Loading PDF preview…") else Box(modifier.pointerInput(path, totalPages) {
+    if (totalPages == 0) Text("Loading PDF preview…") else Box(modifier.pointerInput(path, totalPages) {
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
             var totalY = 0f
@@ -561,8 +551,8 @@ private fun PdfPreview(path: String, modifier: Modifier) {
         }
     }) {
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            itemsIndexed(pages) { index, page ->
-                ZoomablePage(page, index)
+            items(totalPages) { index ->
+                PdfPage(path, index)
             }
         }
         Surface(Modifier.align(Alignment.TopEnd).padding(8.dp), color = Color(0xEE18221E), shape = RoundedCornerShape(12.dp)) {
@@ -574,6 +564,29 @@ private fun PdfPreview(path: String, modifier: Modifier) {
                 Text(if (atStart) "Start of document" else "End of document", Modifier.padding(horizontal = 14.dp, vertical = 9.dp), color = Color.White, style = MaterialTheme.typography.labelLarge)
             }
         }
+    }
+}
+
+@Composable
+private fun PdfPage(path: String, index: Int) {
+    var page by remember(path, index) { mutableStateOf<android.graphics.Bitmap?>(null) }
+    LaunchedEffect(path, index) {
+        page = withContext(Dispatchers.IO) {
+            try {
+                val descriptor = android.os.ParcelFileDescriptor.open(File(path), android.os.ParcelFileDescriptor.MODE_READ_ONLY)
+                val renderer = android.graphics.pdf.PdfRenderer(descriptor)
+                renderer.openPage(index).let { source ->
+                    val bitmap = android.graphics.Bitmap.createBitmap(source.width, source.height, android.graphics.Bitmap.Config.ARGB_8888)
+                    source.render(bitmap, null, null, android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                    source.close(); renderer.close(); descriptor.close(); bitmap
+                }
+            } catch (_: Exception) { null }
+        }
+    }
+    if (page == null) {
+        Box(Modifier.fillMaxWidth().height(220.dp), contentAlignment = Alignment.Center) { Text("Loading page ${index + 1}…", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+    } else {
+        ZoomablePage(page!!, index)
     }
 }
 

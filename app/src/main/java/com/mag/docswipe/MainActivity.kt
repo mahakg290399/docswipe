@@ -13,6 +13,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -114,7 +115,21 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { DocSwipeTheme { DocSwipeApp(model) } }
+        val preferences = getSharedPreferences("settings", 0)
+        setContent {
+            var themeMode by remember { mutableStateOf(preferences.getString("theme_mode", "SYSTEM") ?: "SYSTEM") }
+            val darkTheme = when (themeMode) {
+                "DARK" -> true
+                "LIGHT" -> false
+                else -> isSystemInDarkTheme()
+            }
+            DocSwipeTheme(darkTheme) {
+                DocSwipeApp(model, themeMode) { mode ->
+                    themeMode = mode
+                    preferences.edit().putString("theme_mode", mode).apply()
+                }
+            }
+        }
     }
 
     override fun onResume() {
@@ -239,7 +254,7 @@ data class DeleteResult(val attempted: Int, val deleted: Int, val failed: Int, v
 private enum class Screen { HOME, DECK, REVIEW, SETTINGS }
 
 @Composable
-fun DocSwipeApp(model: DocSwipeViewModel) {
+fun DocSwipeApp(model: DocSwipeViewModel, themeMode: String, onThemeModeChange: (String) -> Unit) {
     var screen by remember { mutableStateOf(Screen.HOME) }
     var selectedMonth by remember { mutableStateOf("") }
     var showPermissionInfo by remember { mutableStateOf(!model.storageGranted) }
@@ -289,7 +304,7 @@ fun DocSwipeApp(model: DocSwipeViewModel) {
         Screen.HOME -> HomeScreen(model, onOpen = { selectedMonth = it; model.openMonth(it); screen = Screen.DECK }, onSettings = { screen = Screen.SETTINGS }, onScan = model::scan)
         Screen.DECK -> DeckScreen(model, selectedMonth, onBack = { screen = Screen.HOME }, onReview = { model.openReview(selectedMonth); screen = Screen.REVIEW })
         Screen.REVIEW -> ReviewScreen(model, selectedMonth, onBack = { screen = Screen.DECK }, onDeleted = { model.deleteStaged(selectedMonth); screen = Screen.HOME })
-        Screen.SETTINGS -> SettingsScreen(model, onBack = { screen = Screen.HOME }, onScan = model::scan)
+        Screen.SETTINGS -> SettingsScreen(model, onBack = { screen = Screen.HOME }, onScan = model::scan, themeMode = themeMode, onThemeModeChange = onThemeModeChange)
     }
 
     model.result?.let { result ->
@@ -1130,9 +1145,23 @@ private fun ReviewScreen(model: DocSwipeViewModel, month: String, onBack: () -> 
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SettingsScreen(model: DocSwipeViewModel, onBack: () -> Unit, onScan: () -> Unit) {
+private fun SettingsScreen(model: DocSwipeViewModel, onBack: () -> Unit, onScan: () -> Unit, themeMode: String, onThemeModeChange: (String) -> Unit) {
     Scaffold(topBar = { TopAppBar(title = { Text("Settings") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back") } }) }) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Appearance", style = MaterialTheme.typography.titleMedium)
+            Text("Choose Light, Dark, or follow your phone's System setting.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf("LIGHT" to "Light", "DARK" to "Dark", "SYSTEM" to "System").forEach { (mode, label) ->
+                    Button(
+                        onClick = { onThemeModeChange(mode) },
+                        modifier = Modifier.weight(1f),
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                            containerColor = if (themeMode == mode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                            contentColor = if (themeMode == mode) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    ) { Text(label) }
+                }
+            }
             Text("Scan hidden folders", style = MaterialTheme.typography.titleMedium)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text(if (model.includeHidden) "Enabled" else "Disabled", color = if (model.includeHidden) Color(0xFF2E7D32) else MaterialTheme.colorScheme.onSurfaceVariant)

@@ -502,7 +502,7 @@ private fun DeckScreen(model: DocSwipeViewModel, month: String, onBack: () -> Un
     val totalDocuments = model.totalDocuments(month)
     val active = model.deck.firstOrNull()
     Scaffold(containerColor = MaterialTheme.colorScheme.background, topBar = {
-        Surface(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp), color = Color.White, shape = RoundedCornerShape(20.dp), shadowElevation = 3.dp) {
+        Surface(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp), color = MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(20.dp), shadowElevation = 3.dp) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back") }
                 Column(Modifier.weight(1f)) {

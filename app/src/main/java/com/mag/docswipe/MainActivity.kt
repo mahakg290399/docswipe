@@ -183,6 +183,11 @@ class DocSwipeViewModel(application: android.app.Application) : AndroidViewModel
         deck = db.documents(month)
         if (deck.isEmpty() && db.hasSkipped(month)) skippedPrompt = true
     }
+    fun restartMonth(month: String) {
+        db.resetReview(month)
+        refresh()
+        openMonth(month)
+    }
     fun reviewSkipped(month: String) {
         reviewingSkipped = true
         deferredSkippedIds.clear()
@@ -301,7 +306,13 @@ fun DocSwipeApp(model: DocSwipeViewModel, themeMode: String, onThemeModeChange: 
     }
 
     when (screen) {
-        Screen.HOME -> HomeScreen(model, onOpen = { selectedMonth = it; model.openMonth(it); screen = Screen.DECK }, onSettings = { screen = Screen.SETTINGS }, onScan = model::scan)
+        Screen.HOME -> HomeScreen(
+            model,
+            onOpen = { selectedMonth = it; model.openMonth(it); screen = Screen.DECK },
+            onRestart = { selectedMonth = it; model.restartMonth(it); screen = Screen.DECK },
+            onSettings = { screen = Screen.SETTINGS },
+            onScan = model::scan
+        )
         Screen.DECK -> DeckScreen(model, selectedMonth, onBack = { screen = Screen.HOME }, onReview = { model.openReview(selectedMonth); screen = Screen.REVIEW })
         Screen.REVIEW -> ReviewScreen(model, selectedMonth, onBack = { screen = Screen.DECK }, onDeleted = { model.deleteStaged(selectedMonth); screen = Screen.HOME })
         Screen.SETTINGS -> SettingsScreen(model, onBack = { screen = Screen.HOME }, onScan = model::scan, themeMode = themeMode, onThemeModeChange = onThemeModeChange)
@@ -331,7 +342,7 @@ private fun contextPrefs(model: DocSwipeViewModel) = model.getApplication<DocSwi
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun HomeScreen(model: DocSwipeViewModel, onOpen: (String) -> Unit, onSettings: () -> Unit, onScan: () -> Unit) {
+private fun HomeScreen(model: DocSwipeViewModel, onOpen: (String) -> Unit, onRestart: (String) -> Unit, onSettings: () -> Unit, onScan: () -> Unit) {
     var sortMenuOpen by remember { mutableStateOf(false) }
     var sortMode by remember { mutableStateOf(HomeSort.DATE_OLDEST) }
     var inProgressExpanded by remember { mutableStateOf(true) }
@@ -426,7 +437,7 @@ private fun HomeScreen(model: DocSwipeViewModel, onOpen: (String) -> Unit, onSet
             }
             if (completedExpanded) {
                 items(completedMonths, key = { it.month }) { month ->
-                    MonthCard(month, onClick = { onOpen(month.month) })
+                    MonthCard(month, onClick = { onRestart(month.month) })
                 }
             }
             item {

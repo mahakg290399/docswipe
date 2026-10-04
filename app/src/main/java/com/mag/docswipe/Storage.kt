@@ -102,6 +102,10 @@ class DocSwipeDatabase(context: Context) : SQLiteOpenHelper(context, "docswipe.d
         writableDatabase.update("documents", ContentValues().apply { put("status", status.name) }, "id = ?", arrayOf(id))
     }
 
+    fun resetReview(month: String) {
+        writableDatabase.update("documents", ContentValues().apply { put("status", Triage.UNREVIEWED.name) }, "month = ?", arrayOf(month))
+    }
+
     fun remove(id: String) {
         val db = writableDatabase
         val group = db.rawQuery("SELECT duplicate_group FROM documents WHERE id = ?", arrayOf(id)).use { if (it.moveToFirst()) it.getString(0) else null }

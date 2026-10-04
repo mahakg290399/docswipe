@@ -11,11 +11,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.draggable
-import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -518,17 +515,42 @@ private fun ActionButton(icon: androidx.compose.ui.graphics.vector.ImageVector, 
 @Composable
 private fun DocumentCard(document: Document, modifier: Modifier, onLeft: () -> Unit, onRight: () -> Unit) {
     var offset by remember(document.id) { mutableFloatStateOf(0f) }
-    val dragState = rememberDraggableState { delta -> offset += delta }
     Card(colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = Color.White), modifier = modifier
         .graphicsLayer { translationX = offset; rotationZ = offset / 34f }
-        .draggable(
-            state = dragState,
-            orientation = Orientation.Horizontal,
-            onDragStopped = {
-                when { offset < -180f -> onLeft(); offset > 180f -> onRight() }
-                offset = 0f
+        .pointerInput(document.id) {
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false)
+                var last = down.position
+                var totalX = 0f
+                var totalY = 0f
+                var horizontal = false
+                var axisChosen = false
+                while (true) {
+                    val change = awaitPointerEvent().changes.firstOrNull() ?: break
+                    if (change.changedToUp()) {
+                        if (axisChosen && horizontal) {
+                            when { offset < -180f -> onLeft(); offset > 180f -> onRight() }
+                        }
+                        offset = 0f
+                        break
+                    }
+                    val dx = change.position.x - last.x
+                    val dy = change.position.y - last.y
+                    totalX += dx
+                    totalY += dy
+                    if (!axisChosen && kotlin.math.hypot(totalX, totalY) > viewConfiguration.touchSlop) {
+                        axisChosen = true
+                        // Allow a natural diagonal horizontal swipe while preserving vertical scrolling.
+                        horizontal = kotlin.math.abs(totalX) >= kotlin.math.abs(totalY) * 0.75f
+                    }
+                    if (axisChosen && horizontal) {
+                        offset += dx
+                        change.consumePositionChange()
+                    }
+                    last = change.position
+                }
             }
-        )) {
+        }) {
         Box(Modifier.fillMaxSize()) {
             DocumentViewer(document, Modifier.fillMaxSize())
             SwipeActionHint(offset)

@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material.icons.filled.Check
@@ -48,6 +49,8 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -272,9 +275,19 @@ private fun contextPrefs(model: DocSwipeViewModel) = model.getApplication<DocSwi
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun HomeScreen(model: DocSwipeViewModel, onOpen: (String) -> Unit, onSettings: () -> Unit, onScan: () -> Unit) {
+    var sortMenuOpen by remember { mutableStateOf(false) }
+    var sortMode by remember { mutableStateOf(HomeSort.DATE_OLDEST) }
     val reviewed = model.months.sumOf { it.count - it.pending }
     val total = model.months.sumOf { it.count }
     val progress = if (total == 0) 0f else reviewed.toFloat() / total
+    val sortedMonths = remember(model.months, sortMode) {
+        when (sortMode) {
+            HomeSort.DATE_OLDEST -> model.months.sortedBy { it.month }
+            HomeSort.DATE_NEWEST -> model.months.sortedByDescending { it.month }
+            HomeSort.FILES_FEWEST -> model.months.sortedWith(compareBy<MonthSummary> { it.count }.thenBy { it.month })
+            HomeSort.FILES_MOST -> model.months.sortedWith(compareByDescending<MonthSummary> { it.count }.thenBy { it.month })
+        }
+    }
 
     Scaffold(containerColor = MaterialTheme.colorScheme.background) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding).padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -286,6 +299,15 @@ private fun HomeScreen(model: DocSwipeViewModel, onOpen: (String) -> Unit, onSet
                     }
                     Row {
                         IconButton(onClick = onScan) { Icon(Icons.Default.Refresh, "Rescan") }
+                        Box {
+                            IconButton(onClick = { sortMenuOpen = true }) { Icon(Icons.Default.Sort, "Sort") }
+                            DropdownMenu(expanded = sortMenuOpen, onDismissRequest = { sortMenuOpen = false }) {
+                                DropdownMenuItem(text = { Text("Date: oldest first") }, onClick = { sortMode = HomeSort.DATE_OLDEST; sortMenuOpen = false })
+                                DropdownMenuItem(text = { Text("Date: newest first") }, onClick = { sortMode = HomeSort.DATE_NEWEST; sortMenuOpen = false })
+                                DropdownMenuItem(text = { Text("Files: fewest first") }, onClick = { sortMode = HomeSort.FILES_FEWEST; sortMenuOpen = false })
+                                DropdownMenuItem(text = { Text("Files: most first") }, onClick = { sortMode = HomeSort.FILES_MOST; sortMenuOpen = false })
+                            }
+                        }
                         IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, "Settings") }
                     }
                 }
@@ -309,7 +331,7 @@ private fun HomeScreen(model: DocSwipeViewModel, onOpen: (String) -> Unit, onSet
             }
             item { Text("In progress", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 4.dp)) }
             if (model.months.isEmpty() && !model.scanning) item { EmptyState() }
-            items(model.months, key = { it.month }) { month ->
+            items(sortedMonths, key = { it.month }) { month ->
                 MonthCard(month, onClick = { onOpen(month.month) })
             }
             item {
@@ -333,6 +355,8 @@ private fun HomeScreen(model: DocSwipeViewModel, onOpen: (String) -> Unit, onSet
         }
     }
 }
+
+private enum class HomeSort { DATE_OLDEST, DATE_NEWEST, FILES_FEWEST, FILES_MOST }
 
 @Composable
 private fun MonthCard(month: MonthSummary, onClick: () -> Unit) {

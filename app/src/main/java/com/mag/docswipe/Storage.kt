@@ -86,6 +86,10 @@ class DocSwipeDatabase(context: Context) : SQLiteOpenHelper(context, "docswipe.d
 
     fun hasSkipped(month: String): Boolean = readableDatabase.rawQuery("SELECT 1 FROM documents WHERE month = ? AND status = 'SKIPPED' LIMIT 1", arrayOf(month)).use { it.moveToFirst() }
 
+    fun count(month: String): Int = readableDatabase.rawQuery(
+        "SELECT COUNT(*) FROM documents WHERE month = ?", arrayOf(month)
+    ).use { if (it.moveToFirst()) it.getInt(0) else 0 }
+
     fun staged(month: String): List<Document> = readableDatabase.rawQuery(
         "SELECT id,path,name,extension,size,modified,month,status,sha256,duplicate_group,original FROM documents WHERE month = ? AND status = 'STAGED_DELETE' ORDER BY modified ASC", arrayOf(month)
     ).use(::readDocuments)

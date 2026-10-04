@@ -171,6 +171,7 @@ class DocSwipeViewModel(application: android.app.Application) : AndroidViewModel
         skippedPrompt = false
         deck = db.documents(month, includeSkipped = true)
     }
+    fun totalDocuments(month: String): Int = db.count(month)
     fun leaveSkipped() { skippedPrompt = false; deferredSkippedIds.clear(); deck = emptyList() }
     fun stagedCount(month: String): Int = db.staged(month).size
     fun tutorialShown(month: String): Boolean {
@@ -430,7 +431,7 @@ private fun DeckScreen(model: DocSwipeViewModel, month: String, onBack: () -> Un
     var undo by remember { mutableStateOf<Document?>(null) }
     var showCompletionDialog by remember(month) { mutableStateOf(false) }
     var showTutorial by remember(month) { mutableStateOf(!model.tutorialShown(month)) }
-    val totalDocuments = remember(month) { model.deck.size }
+    val totalDocuments = model.totalDocuments(month)
     val active = model.deck.firstOrNull()
     Scaffold(containerColor = MaterialTheme.colorScheme.background, topBar = {
         Surface(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp), color = Color.White, shape = RoundedCornerShape(20.dp), shadowElevation = 3.dp) {
@@ -804,7 +805,17 @@ private fun renderOfficeDocument(context: android.content.Context, path: String)
     })
     val rendered = service.bringOffline(output.absolutePath)
     val pages = rendered.pages()
-    if (pages.isEmpty()) "ERROR:The document did not contain a renderable page."
+    if (pages.isEmpty()) {
+        service.close()
+        decoded.close()
+        "ERROR:The document did not contain a renderable page."
+    }
+    else if (pages.size == 1) {
+        val page = File(pages.first().path).toURI().toString()
+        service.close()
+        decoded.close()
+        page
+    }
     else {
         val wrapper = File(output, "docswipe-wrapper.html")
         wrapper.writeText("""

@@ -1,6 +1,7 @@
 package com.mag.docswipe
 
 import android.content.Intent
+import android.text.Html
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
@@ -95,6 +96,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import java.io.File
 import java.text.DecimalFormat
+import java.util.zip.ZipFile
 import com.shockwave.pdfium.PdfDocument
 import com.shockwave.pdfium.PdfPasswordException
 import com.shockwave.pdfium.PdfiumCore
@@ -559,7 +561,7 @@ private fun DocumentViewer(document: Document, modifier: Modifier) {
     Surface(modifier = modifier, color = Color.White) {
         when (document.extension) {
             "pdf" -> PdfPreview(document.path, Modifier.fillMaxSize().padding(10.dp))
-            else -> TextPreview(document.path, Modifier.fillMaxSize().padding(14.dp))
+            else -> TextPreview(document.path, document.extension, Modifier.fillMaxSize().padding(14.dp))
         }
     }
 }
@@ -725,13 +727,49 @@ private sealed interface PdfLoadResult {
 }
 
 @Composable
-private fun TextPreview(path: String, modifier: Modifier) {
-    val lines = remember(path) { runCatching { File(path).bufferedReader().useLines { it.take(200).toList() } }.getOrElse { listOf("Preview unavailable") } }
+private fun TextPreview(path: String, extension: String, modifier: Modifier) {
+    val lines = remember(path, extension) { runCatching { previewLines(path, extension) }.getOrElse { listOf("Preview unavailable") } }
     var scale by remember(path) { mutableFloatStateOf(1f) }
     val transformState = rememberTransformableState { zoomChange, _, _ -> scale = (scale * zoomChange).coerceIn(1f, 3f) }
     Box(modifier.transformable(transformState).graphicsLayer { scaleX = scale; scaleY = scale }) {
         LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) { items(lines) { Text(it, color = Color(0xFF18221E)) } }
     }
+}
+
+private fun previewLines(path: String, extension: String): List<String> {
+    val text = when (extension) {
+        "docx" -> officeXmlText(path, "word/document.xml")
+        "xlsx" -> spreadsheetText(path)
+        "pptx" -> presentationText(path)
+        else -> File(path).bufferedReader().useLines { it.take(400).toList() }.joinToString("\n")
+    }
+    return text.lines().map { it.trim() }.filter { it.isNotBlank() }.take(400).ifEmpty { listOf("Preview unavailable") }
+}
+
+private fun officeXmlText(path: String, entryName: String): String = ZipFile(path).use { zip ->
+    val entry = zip.getEntry(entryName) ?: return@use ""
+    val xml = zip.getInputStream(entry).bufferedReader(Charsets.UTF_8).use { it.readText() }
+    cleanXmlText(xml.replace(Regex("</w:p>"), "\n"))
+}
+
+private fun spreadsheetText(path: String): String = ZipFile(path).use { zip ->
+    val entries = zip.entries().toList().filter { it.name.matches(Regex("xl/worksheets/sheet\\d+\\.xml")) }.sortedBy { it.name }
+    entries.joinToString("\n\n") { entry ->
+        val xml = zip.getInputStream(entry).bufferedReader(Charsets.UTF_8).use { it.readText() }
+        cleanXmlText(xml.replace(Regex("</row>"), "\n").replace(Regex("</c>"), "\t"))
+    }
+}
+
+private fun presentationText(path: String): String = ZipFile(path).use { zip ->
+    zip.entries().toList().filter { it.name.matches(Regex("ppt/slides/slide\\d+\\.xml")) }.sortedBy { it.name }.joinToString("\n\n") { entry ->
+        val xml = zip.getInputStream(entry).bufferedReader(Charsets.UTF_8).use { it.readText() }
+        cleanXmlText(xml.replace(Regex("</a:p>"), "\n"))
+    }
+}
+
+private fun cleanXmlText(xml: String): String {
+    val withoutTags = xml.replace(Regex("<[^>]+>"), " ")
+    return Html.fromHtml(withoutTags, Html.FROM_HTML_MODE_LEGACY).toString()
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

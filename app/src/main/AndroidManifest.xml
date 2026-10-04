@@ -4,7 +4,9 @@
     <application
         android:name=".DocSwipeApplication"
         android:allowBackup="false"
+        android:icon="@drawable/docswipe_icon"
         android:label="DocSwipe"
+        android:roundIcon="@drawable/docswipe_icon"
         android:supportsRtl="true"
         android:theme="@style/Theme.DocSwipe">
         <activity

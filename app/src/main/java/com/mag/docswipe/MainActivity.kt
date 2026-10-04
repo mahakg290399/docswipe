@@ -731,10 +731,25 @@ private fun PdfPage(path: String, index: Int, password: String?) {
                 val core = PdfiumCore(context)
                 document = core.newDocument(descriptor, password)
                 core.openPage(document!!, index)
-                val width = core.getPageWidth(document!!, index)
-                val height = core.getPageHeight(document!!, index)
-                val bitmap = android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888)
-                core.renderPageBitmap(document!!, bitmap, index, 0, 0, width, height, true)
+                val nativeWidth = core.getPageWidth(document!!, index)
+                val nativeHeight = core.getPageHeight(document!!, index)
+                require(nativeWidth > 0 && nativeHeight > 0) { "PDF page has invalid dimensions" }
+
+                // Render for the phone display instead of allocating PDFium's full native bitmap.
+                // Some PDFs report very large internal dimensions despite having a normal page box.
+                val displayWidth = context.resources.displayMetrics.widthPixels.coerceAtMost(1600).coerceAtLeast(1)
+                var renderWidth = nativeWidth.coerceAtMost(displayWidth)
+                var renderHeight = (nativeHeight.toDouble() * renderWidth / nativeWidth).toInt().coerceAtLeast(1)
+                val maxBitmapBytes = 32L * 1024L * 1024L
+                val bitmapBytes = renderWidth.toLong() * renderHeight.toLong() * 4L
+                if (bitmapBytes > maxBitmapBytes) {
+                    val factor = kotlin.math.sqrt(maxBitmapBytes.toDouble() / bitmapBytes)
+                    renderWidth = (renderWidth * factor).toInt().coerceAtLeast(1)
+                    renderHeight = (renderHeight * factor).toInt().coerceAtLeast(1)
+                }
+                Log.d("DocSwipe.Pdf", "Rendering page ${index + 1}: native=${nativeWidth}x${nativeHeight}, bitmap=${renderWidth}x${renderHeight}")
+                val bitmap = android.graphics.Bitmap.createBitmap(renderWidth, renderHeight, android.graphics.Bitmap.Config.ARGB_8888)
+                core.renderPageBitmap(document!!, bitmap, index, 0, 0, renderWidth, renderHeight, true)
                 core.closeDocument(document!!)
                 document = null
                 bitmap

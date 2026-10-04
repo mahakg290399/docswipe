@@ -100,7 +100,12 @@ import app.opendocument.core.Odr
 import app.opendocument.core.android.OdrAndroid
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.util.Xml
 import androidx.activity.compose.BackHandler
+import org.xmlpull.v1.XmlPullParser
+import java.io.FileInputStream
+import java.net.URLDecoder
+import java.util.zip.ZipInputStream
 
 class MainActivity : ComponentActivity() {
     private val model by viewModels<DocSwipeViewModel>()
@@ -429,7 +434,7 @@ private fun EmptyState() {
     Surface(shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.surface) {
         Column(Modifier.fillMaxWidth().padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("No documents yet", style = MaterialTheme.typography.titleMedium)
-            Text("Scan your device to find PDFs, Office files, TXT, and CSV documents.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Scan your device to find PDFs, Office files, books, and comics.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -638,6 +643,7 @@ private fun DocumentViewer(document: Document, modifier: Modifier) {
         when (document.extension) {
             "pdf" -> PdfPreview(document.path, Modifier.fillMaxSize().padding(10.dp))
             "txt", "csv" -> TextPreview(document.path, Modifier.fillMaxSize().padding(14.dp))
+            "epub", "cbz" -> ArchivePreview(document.path, Modifier.fillMaxSize().padding(10.dp))
             else -> OfficePreview(document.path, Modifier.fillMaxSize().padding(10.dp))
         }
     }
@@ -834,6 +840,159 @@ private fun TextPreview(path: String, modifier: Modifier) {
         } else {
             LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 items(lines!!) { Text(it, color = Color(0xFF18221E)) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ArchivePreview(path: String, modifier: Modifier) {
+    val context = LocalContext.current
+    var renderedPath by remember(path) { mutableStateOf<String?>(null) }
+    var renderError by remember(path) { mutableStateOf<String?>(null) }
+    LaunchedEffect(path) {
+        renderedPath = null
+        renderError = null
+        val result = withContext(Dispatchers.IO) {
+            when (File(path).extension.lowercase()) {
+                "epub" -> renderEpubDocument(context, path)
+                "cbz" -> renderCbzDocument(context, path)
+                else -> "ERROR:Unsupported book format."
+            }
+        }
+        if (result.startsWith("ERROR:")) renderError = result.removePrefix("ERROR:") else renderedPath = result
+    }
+    when {
+        renderError != null -> Surface(modifier, color = Color(0xFFFFF7F5), shape = RoundedCornerShape(16.dp)) {
+            Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Preview unavailable", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.error)
+                Text(renderError!!, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        renderedPath == null -> Box(modifier, contentAlignment = Alignment.Center) { Text("Preparing preview…", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        else -> AndroidView(
+            modifier = modifier,
+            factory = { context ->
+                WebView(context).apply {
+                    settings.javaScriptEnabled = false
+                    settings.allowFileAccess = true
+                    settings.allowContentAccess = false
+                    webViewClient = WebViewClient()
+                    setBackgroundColor(android.graphics.Color.WHITE)
+                }
+            },
+            update = { webView ->
+                if (webView.url != renderedPath) webView.loadUrl(renderedPath!!)
+            }
+        )
+    }
+}
+
+private fun renderEpubDocument(context: android.content.Context, path: String): String {
+    return try {
+    val output = File(context.cacheDir, "book-render/${File(path).nameWithoutExtension}-${File(path).lastModified()}")
+    output.deleteRecursively()
+    output.mkdirs()
+    extractZip(File(path), output)
+
+    val container = File(output, "META-INF/container.xml")
+    val opfPath = readXmlAttribute(container, "rootfile", "full-path")
+        ?: return "ERROR:The EPUB package is missing its book manifest."
+    val opf = File(output, opfPath).canonicalFile
+    if (!opf.path.startsWith(output.canonicalPath + File.separator)) return "ERROR:Invalid EPUB package paths."
+
+    val manifest = mutableMapOf<String, String>()
+    val spine = mutableListOf<String>()
+    parseEpubPackage(opf, manifest, spine)
+    val pages = spine.mapNotNull { id ->
+        manifest[id]?.let { href ->
+            val cleanHref = Uri.decode(href.substringBefore('#'))
+            File(opf.parentFile, cleanHref).canonicalFile.takeIf { it.path.startsWith(output.canonicalPath + File.separator) && it.exists() }
+        }
+    }
+    if (pages.isEmpty()) return "ERROR:The EPUB does not contain readable chapters."
+    val wrapper = File(output, "docswipe-wrapper.html")
+    wrapper.writeText("""
+        <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>
+        html,body{margin:0;padding:0;background:#eef2ef;}iframe{display:block;width:100%;min-height:100vh;border:0;margin:0 0 12px;background:white;}
+        </style></head><body>${pages.joinToString("") { "<iframe src=\"${it.toURI()}\"></iframe>" }}</body></html>
+    """.trimIndent())
+    wrapper.toURI().toString()
+    } catch (error: Exception) {
+    Log.e("DocSwipe.Epub", "Unable to render EPUB: $path", error)
+    "ERROR:${error.message ?: "The EPUB could not be rendered."}"
+    }
+}
+
+private fun renderCbzDocument(context: android.content.Context, path: String): String {
+    return try {
+    val output = File(context.cacheDir, "book-render/${File(path).nameWithoutExtension}-${File(path).lastModified()}")
+    output.deleteRecursively()
+    output.mkdirs()
+    extractZip(File(path), output)
+    val images = output.walkTopDown().filter { it.isFile && it.extension.lowercase() in setOf("jpg", "jpeg", "png", "webp", "gif") }.toList()
+        .sortedBy { it.relativeTo(output).path.lowercase() }
+    if (images.isEmpty()) return "ERROR:The CBZ does not contain readable comic pages."
+    val wrapper = File(output, "docswipe-wrapper.html")
+    wrapper.writeText("""
+        <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>
+        html,body{margin:0;padding:0;background:#eef2ef;}img{display:block;width:100%;height:auto;margin:0 0 10px;background:white;}
+        </style></head><body>${images.joinToString("") { "<img src=\"${it.toURI()}\" loading=\"lazy\">" }}</body></html>
+    """.trimIndent())
+    wrapper.toURI().toString()
+    } catch (error: Exception) {
+    Log.e("DocSwipe.Cbz", "Unable to render CBZ: $path", error)
+    "ERROR:${error.message ?: "The CBZ could not be rendered."}"
+    }
+}
+
+private fun extractZip(source: File, output: File) {
+    val root = output.canonicalFile
+    ZipInputStream(FileInputStream(source)).use { zip ->
+        val buffer = ByteArray(64 * 1024)
+        while (true) {
+            val entry = zip.nextEntry ?: break
+            val target = File(output, entry.name).canonicalFile
+            require(target.path == root.path || target.path.startsWith(root.path + File.separator)) { "Invalid archive path" }
+            if (entry.isDirectory) target.mkdirs() else {
+                target.parentFile?.mkdirs()
+                target.outputStream().use { out ->
+                    while (true) {
+                        val count = zip.read(buffer)
+                        if (count < 0) break
+                        out.write(buffer, 0, count)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun readXmlAttribute(file: File, tag: String, attribute: String): String? {
+    if (!file.exists()) return null
+    val parser = Xml.newPullParser()
+    file.inputStream().use { input ->
+        parser.setInput(input, null)
+        while (parser.next() != XmlPullParser.END_DOCUMENT) {
+            if (parser.eventType == XmlPullParser.START_TAG && parser.name == tag) return parser.getAttributeValue(null, attribute)
+        }
+    }
+    return null
+}
+
+private fun parseEpubPackage(file: File, manifest: MutableMap<String, String>, spine: MutableList<String>) {
+    val parser = Xml.newPullParser()
+    file.inputStream().use { input ->
+        parser.setInput(input, null)
+        while (parser.next() != XmlPullParser.END_DOCUMENT) {
+            if (parser.eventType != XmlPullParser.START_TAG) continue
+            when (parser.name) {
+                "item" -> {
+                    val id = parser.getAttributeValue(null, "id")
+                    val href = parser.getAttributeValue(null, "href")
+                    if (!id.isNullOrBlank() && !href.isNullOrBlank()) manifest[id] = href
+                }
+                "itemref" -> parser.getAttributeValue(null, "idref")?.let(spine::add)
             }
         }
     }

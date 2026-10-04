@@ -3,7 +3,7 @@ package com.mag.docswipe
 import java.util.Locale
 
 internal object DocumentRules {
-    val supportedExtensions = setOf("pdf", "docx", "xlsx", "pptx", "txt", "csv")
+    val supportedExtensions = setOf("pdf", "docx", "xlsx", "pptx", "txt", "csv", "epub", "cbz")
 
     fun isSupportedFile(name: String, size: Long): Boolean {
         val extension = name.substringAfterLast('.', "").lowercase(Locale.ROOT)

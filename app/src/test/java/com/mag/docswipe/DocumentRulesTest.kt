@@ -13,6 +13,8 @@ class DocumentRulesTest {
         assertTrue(DocumentRules.isSupportedFile("slides.pptx", 42))
         assertTrue(DocumentRules.isSupportedFile("notes.txt", 42))
         assertTrue(DocumentRules.isSupportedFile("data.csv", 42))
+        assertTrue(DocumentRules.isSupportedFile("novel.epub", 42))
+        assertTrue(DocumentRules.isSupportedFile("comic.cbz", 42))
     }
 
     @Test

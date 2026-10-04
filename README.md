@@ -37,6 +37,10 @@ The app scans supported document files, groups them by last-modified month, and 
 - PDF, including password prompts and display-sized rendering to avoid oversized bitmap crashes.
 - DOCX, XLSX, and PPTX with in-app offline rendering.
 - TXT and CSV with in-app text preview and scrolling.
+- EPUB ebooks with chapter-by-chapter in-app reading.
+- CBZ comic books with in-app page scrolling.
+
+CBR, MOBI, AZW, and AZW3 are not included yet because they require additional archive or ebook parsers. They remain excluded from scanning until they can be rendered reliably inside the app.
 
 Office rendering is an offline HTML-based rendering path, not Microsoft Word or Excel’s own layout engine. Complex Office documents containing many floating text boxes, custom fonts, layered shapes, or unusual Word-specific layout features may not match the original application perfectly.
 

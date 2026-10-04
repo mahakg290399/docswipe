@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
@@ -515,21 +516,36 @@ private fun DocumentViewer(document: Document, modifier: Modifier) {
 @Composable
 private fun PdfPreview(path: String, modifier: Modifier) {
     var totalPages by remember(path) { mutableStateOf(0) }
+    var loadError by remember(path) { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
     val pull = remember(path) { Animatable(0f) }
     val scope = rememberCoroutineScope()
     val currentPage by remember { derivedStateOf { (listState.firstVisibleItemIndex + 1).coerceAtMost(totalPages.coerceAtLeast(1)) } }
     LaunchedEffect(path) {
-        totalPages = withContext(Dispatchers.IO) {
+        totalPages = 0
+        loadError = null
+        val result = withContext(Dispatchers.IO) {
             try {
                 val descriptor = android.os.ParcelFileDescriptor.open(File(path), android.os.ParcelFileDescriptor.MODE_READ_ONLY)
                 val renderer = android.graphics.pdf.PdfRenderer(descriptor)
                 val pageCount = renderer.pageCount
                 renderer.close(); descriptor.close(); pageCount
-            } catch (_: Exception) { 0 }
+            } catch (error: Exception) {
+                Log.e("DocSwipe.Pdf", "Unable to open PDF: $path", error)
+                -1
+            }
         }
+        if (result < 0) loadError = "This PDF could not be opened. It may be password-protected, corrupted, or unreadable."
+        else totalPages = result
     }
-    if (totalPages == 0) Text("Loading PDF preview…") else Box(modifier.pointerInput(path, totalPages) {
+    if (loadError != null) {
+        Surface(modifier, color = Color(0xFFFFF7F5), shape = RoundedCornerShape(16.dp)) {
+            Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("PDF preview unavailable", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.error)
+                Text(loadError!!, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    } else if (totalPages == 0) Text("Loading PDF preview…") else Box(modifier.pointerInput(path, totalPages) {
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
             var totalY = 0f
@@ -571,8 +587,9 @@ private fun PdfPreview(path: String, modifier: Modifier) {
 @Composable
 private fun PdfPage(path: String, index: Int) {
     var page by remember(path, index) { mutableStateOf<android.graphics.Bitmap?>(null) }
+    var error by remember(path, index) { mutableStateOf(false) }
     LaunchedEffect(path, index) {
-        page = withContext(Dispatchers.IO) {
+        val loaded = withContext(Dispatchers.IO) {
             try {
                 val descriptor = android.os.ParcelFileDescriptor.open(File(path), android.os.ParcelFileDescriptor.MODE_READ_ONLY)
                 val renderer = android.graphics.pdf.PdfRenderer(descriptor)
@@ -581,10 +598,19 @@ private fun PdfPage(path: String, index: Int) {
                     source.render(bitmap, null, null, android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
                     source.close(); renderer.close(); descriptor.close(); bitmap
                 }
-            } catch (_: Exception) { null }
+            } catch (exception: Exception) {
+                Log.e("DocSwipe.Pdf", "Unable to render page ${index + 1}: $path", exception)
+                null
+            }
         }
+        page = loaded
+        error = loaded == null
     }
-    if (page == null) {
+    if (error) {
+        Surface(Modifier.fillMaxWidth().height(120.dp), color = Color(0xFFFFF7F5), shape = RoundedCornerShape(8.dp)) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Unable to render page ${index + 1}", color = MaterialTheme.colorScheme.error) }
+        }
+    } else if (page == null) {
         Box(Modifier.fillMaxWidth().height(220.dp), contentAlignment = Alignment.Center) { Text("Loading page ${index + 1}…", color = MaterialTheme.colorScheme.onSurfaceVariant) }
     } else {
         ZoomablePage(page!!, index)

@@ -10,8 +10,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -63,9 +64,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.positionChange
-import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
@@ -407,41 +405,23 @@ private fun ActionButton(icon: androidx.compose.ui.graphics.vector.ImageVector, 
 @Composable
 private fun DocumentCard(document: Document, modifier: Modifier, onLeft: () -> Unit, onRight: () -> Unit) {
     var offset by remember(document.id) { mutableFloatStateOf(0f) }
-    Card(modifier.graphicsLayer { translationX = offset; rotationZ = offset / 34f }.pointerInput(document.id) {
-        awaitEachGesture {
-            val down = awaitFirstDown(requireUnconsumed = false)
-            var lock: GestureLock? = null
-            var totalX = 0f
-            var totalY = 0f
-            while (true) {
-                val event = awaitPointerEvent()
-                val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                if (change.changedToUp()) break
-                val delta = change.positionChange()
-                totalX += delta.x
-                totalY += delta.y
-                if (lock == null && (kotlin.math.abs(totalX) > 12f || kotlin.math.abs(totalY) > 12f)) {
-                    lock = if (kotlin.math.abs(totalX) > kotlin.math.abs(totalY) * 1.25f) GestureLock.HORIZONTAL else GestureLock.VERTICAL
-                }
-                if (lock == GestureLock.HORIZONTAL) {
-                    offset += delta.x
-                    change.consume()
-                }
-            }
-            if (lock == GestureLock.HORIZONTAL) {
+    val dragState = rememberDraggableState { delta -> offset += delta }
+    Card(modifier
+        .graphicsLayer { translationX = offset; rotationZ = offset / 34f }
+        .draggable(
+            state = dragState,
+            orientation = Orientation.Horizontal,
+            onDragStopped = {
                 when { offset < -180f -> onLeft(); offset > 180f -> onRight() }
+                offset = 0f
             }
-            offset = 0f
-        }
-    }) {
+        )) {
         Box(Modifier.fillMaxSize()) {
             DocumentViewer(document, Modifier.fillMaxSize())
             SwipeActionHint(offset)
         }
     }
 }
-
-private enum class GestureLock { HORIZONTAL, VERTICAL }
 
 @Composable
 private fun SwipeActionHint(offset: Float) {

@@ -287,11 +287,12 @@ private fun HomeScreen(model: DocSwipeViewModel, onOpen: (String) -> Unit, onSet
     val total = model.months.sumOf { it.count }
     val progress = if (total == 0) 0f else reviewed.toFloat() / total
     val sortedMonths = remember(model.months, sortMode) {
+        val pendingMonths = model.months.filter { it.pending > 0 }
         when (sortMode) {
-            HomeSort.DATE_OLDEST -> model.months.sortedBy { it.month }
-            HomeSort.DATE_NEWEST -> model.months.sortedByDescending { it.month }
-            HomeSort.FILES_FEWEST -> model.months.sortedWith(compareBy<MonthSummary> { it.count }.thenBy { it.month })
-            HomeSort.FILES_MOST -> model.months.sortedWith(compareByDescending<MonthSummary> { it.count }.thenBy { it.month })
+            HomeSort.DATE_OLDEST -> pendingMonths.sortedBy { it.month }
+            HomeSort.DATE_NEWEST -> pendingMonths.sortedByDescending { it.month }
+            HomeSort.FILES_FEWEST -> pendingMonths.sortedWith(compareBy<MonthSummary> { it.count }.thenBy { it.month })
+            HomeSort.FILES_MOST -> pendingMonths.sortedWith(compareByDescending<MonthSummary> { it.count }.thenBy { it.month })
         }
     }
 
@@ -336,7 +337,9 @@ private fun HomeScreen(model: DocSwipeViewModel, onOpen: (String) -> Unit, onSet
                 }
             }
             item { Text("In progress", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 4.dp)) }
-            if (model.months.isEmpty() && !model.scanning) item { EmptyState() }
+            if (sortedMonths.isEmpty() && !model.scanning) item {
+                if (model.months.isEmpty()) EmptyState() else AllCaughtUp()
+            }
             items(sortedMonths, key = { it.month }) { month ->
                 MonthCard(month, onClick = { onOpen(month.month) })
             }
@@ -390,6 +393,16 @@ private fun EmptyState() {
         Column(Modifier.fillMaxWidth().padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("No documents yet", style = MaterialTheme.typography.titleMedium)
             Text("Scan your device to find PDFs, Office files, TXT, and CSV documents.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun AllCaughtUp() {
+    Surface(shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.surface) {
+        Column(Modifier.fillMaxWidth().padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("All caught up", style = MaterialTheme.typography.titleMedium)
+            Text("Completed review decks are hidden from this list.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

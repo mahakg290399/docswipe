@@ -10,8 +10,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -63,6 +64,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
@@ -130,6 +133,8 @@ class DocSwipeViewModel(application: android.app.Application) : AndroidViewModel
     fun reviewSkipped(month: String) { reviewingSkipped = true; skippedPrompt = false; deck = db.documents(month, includeSkipped = true) }
     fun leaveSkipped() { skippedPrompt = false; deck = emptyList() }
     fun stagedCount(month: String): Int = db.staged(month).size
+    fun tutorialShown(month: String): Boolean = getApplication<DocSwipeApplication>().getSharedPreferences("settings", 0).getBoolean("tutorial_$month", false)
+    fun markTutorialShown(month: String) { getApplication<DocSwipeApplication>().getSharedPreferences("settings", 0).edit().putBoolean("tutorial_$month", true).apply() }
     fun openReview(month: String) { staged = db.staged(month) }
     fun act(doc: Document, action: Triage) {
         db.setStatus(doc.id, action)
@@ -342,6 +347,8 @@ private fun EmptyState() {
 private fun DeckScreen(model: DocSwipeViewModel, month: String, onBack: () -> Unit, onReview: () -> Unit) {
     var undo by remember { mutableStateOf<Document?>(null) }
     var showCompletionDialog by remember(month) { mutableStateOf(false) }
+    var showTutorial by remember(month) { mutableStateOf(!model.tutorialShown(month)) }
+    val totalDocuments = remember(month) { model.deck.size }
     val active = model.deck.firstOrNull()
     Scaffold(containerColor = MaterialTheme.colorScheme.background, topBar = { TopAppBar(title = { Text(month) }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back") } }, actions = { TextButton(onClick = onReview) { Text("Review") } }) }, bottomBar = {
         Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 8.dp, shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)) {
@@ -360,7 +367,7 @@ private fun DeckScreen(model: DocSwipeViewModel, month: String, onBack: () -> Un
             }
         }
         else Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp)) {
-            Text("${model.deck.size} documents left", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 10.dp, bottom = 8.dp))
+            Text("${model.deck.size} of $totalDocuments remaining", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 10.dp, bottom = 8.dp))
             DocumentCard(active, Modifier.weight(1f).fillMaxWidth(), onLeft = { undo = active; model.act(active, Triage.STAGED_DELETE) }, onRight = { undo = active; model.act(active, Triage.KEEP) })
             Spacer(Modifier.height(12.dp))
         }
@@ -383,6 +390,10 @@ private fun DeckScreen(model: DocSwipeViewModel, month: String, onBack: () -> Un
             }
         )
     }
+
+    if (showTutorial && active != null) {
+        TutorialOverlay(onDismiss = { showTutorial = false; model.markTutorialShown(month) })
+    }
 }
 
 @Composable
@@ -397,13 +408,91 @@ private fun ActionButton(icon: androidx.compose.ui.graphics.vector.ImageVector, 
 private fun DocumentCard(document: Document, modifier: Modifier, onLeft: () -> Unit, onRight: () -> Unit) {
     var offset by remember(document.id) { mutableFloatStateOf(0f) }
     Card(modifier.graphicsLayer { translationX = offset; rotationZ = offset / 34f }.pointerInput(document.id) {
-        detectDragGestures(onDragEnd = {
-            when { offset < -180f -> onLeft(); offset > 180f -> onRight() }
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false)
+            var lock: GestureLock? = null
+            var totalX = 0f
+            var totalY = 0f
+            while (true) {
+                val event = awaitPointerEvent()
+                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                if (change.changedToUp()) break
+                val delta = change.positionChange()
+                totalX += delta.x
+                totalY += delta.y
+                if (lock == null && (kotlin.math.abs(totalX) > 12f || kotlin.math.abs(totalY) > 12f)) {
+                    lock = if (kotlin.math.abs(totalX) > kotlin.math.abs(totalY) * 1.25f) GestureLock.HORIZONTAL else GestureLock.VERTICAL
+                }
+                if (lock == GestureLock.HORIZONTAL) {
+                    offset += delta.x
+                    change.consume()
+                }
+            }
+            if (lock == GestureLock.HORIZONTAL) {
+                when { offset < -180f -> onLeft(); offset > 180f -> onRight() }
+            }
             offset = 0f
-        }, onDragCancel = { offset = 0f }) { change, drag ->
-            if (kotlin.math.abs(drag.x) > kotlin.math.abs(drag.y)) { offset += drag.x; change.consume() }
         }
-    }) { DocumentViewer(document, Modifier.fillMaxSize()) }
+    }) {
+        Box(Modifier.fillMaxSize()) {
+            DocumentViewer(document, Modifier.fillMaxSize())
+            SwipeActionHint(offset)
+        }
+    }
+}
+
+private enum class GestureLock { HORIZONTAL, VERTICAL }
+
+@Composable
+private fun SwipeActionHint(offset: Float) {
+    val isDelete = offset < -12f
+    val isKeep = offset > 12f
+    if (!isDelete && !isKeep) return
+    val color = if (isDelete) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+    val alpha = (kotlin.math.abs(offset) / 180f).coerceIn(0.15f, 1f)
+    Box(Modifier.fillMaxSize().padding(22.dp), contentAlignment = if (isDelete) Alignment.CenterStart else Alignment.CenterEnd) {
+        Surface(color = color.copy(alpha = alpha), shape = RoundedCornerShape(18.dp)) {
+            Row(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Icon(if (isDelete) Icons.Default.Delete else Icons.Default.Check, if (isDelete) "Delete" else "Keep", tint = Color.White)
+                Text(if (isDelete) "DELETE" else "KEEP", color = Color.White, style = MaterialTheme.typography.labelLarge)
+            }
+        }
+    }
+}
+
+@Composable
+private fun TutorialOverlay(onDismiss: () -> Unit) {
+    var pulse by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            pulse = 1f
+            kotlinx.coroutines.delay(650)
+            pulse = 0f
+            kotlinx.coroutines.delay(350)
+        }
+    }
+    Box(Modifier.fillMaxSize().background(Color(0x990F1713)), contentAlignment = Alignment.Center) {
+        Surface(Modifier.padding(24.dp), shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surface) {
+            Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text("How to review", style = MaterialTheme.typography.headlineSmall)
+                Text("Read the document, then choose what to do with a simple gesture.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                TutorialRow("←", "Delete", MaterialTheme.colorScheme.error, pulse)
+                TutorialRow("→", "Keep", MaterialTheme.colorScheme.primary, pulse)
+                TutorialRow("↑ ↓", "Read and scroll", MaterialTheme.colorScheme.secondary, pulse)
+                Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) { Text("Got it") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TutorialRow(gesture: String, label: String, color: Color, pulse: Float) {
+    Row(Modifier.fillMaxWidth().background(color.copy(alpha = .10f), RoundedCornerShape(16.dp)).padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        Text(gesture, color = color, style = MaterialTheme.typography.headlineSmall)
+        Text(label, style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.weight(1f))
+        Text(if (pulse > 0f) "●" else "○", color = color)
+    }
 }
 
 @Composable
@@ -421,22 +510,28 @@ private fun DocumentViewer(document: Document, modifier: Modifier) {
 
 @Composable
 private fun PdfPreview(path: String) {
-    val context = LocalContext.current
-    var bitmap by remember(path) { mutableStateOf<android.graphics.Bitmap?>(null) }
+    var pages by remember(path) { mutableStateOf<List<android.graphics.Bitmap>>(emptyList()) }
     LaunchedEffect(path) {
-        bitmap = withContext(Dispatchers.IO) {
+        pages = withContext(Dispatchers.IO) {
             try {
                 val descriptor = android.os.ParcelFileDescriptor.open(File(path), android.os.ParcelFileDescriptor.MODE_READ_ONLY)
                 val renderer = android.graphics.pdf.PdfRenderer(descriptor)
-                if (renderer.pageCount == 0) null else renderer.openPage(0).let { page ->
-                    val result = android.graphics.Bitmap.createBitmap(page.width, page.height, android.graphics.Bitmap.Config.ARGB_8888)
-                    page.render(result, null, null, android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                    page.close(); renderer.close(); descriptor.close(); result
+                val result = (0 until minOf(renderer.pageCount, 10)).map { index ->
+                    renderer.openPage(index).let { page ->
+                        val bitmap = android.graphics.Bitmap.createBitmap(page.width, page.height, android.graphics.Bitmap.Config.ARGB_8888)
+                        page.render(bitmap, null, null, android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                        page.close(); bitmap
+                    }
                 }
-            } catch (_: Exception) { null }
+                renderer.close(); descriptor.close(); result
+            } catch (_: Exception) { emptyList() }
         }
     }
-    if (bitmap == null) Text("Loading PDF preview…") else Image(bitmap!!.asImageBitmap(), "PDF preview", Modifier.fillMaxWidth(), contentScale = ContentScale.FillWidth)
+    if (pages.isEmpty()) Text("Loading PDF preview…") else LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        itemsIndexed(pages) { index, page ->
+            Image(page.asImageBitmap(), "PDF page ${index + 1}", Modifier.fillMaxWidth(), contentScale = ContentScale.FillWidth)
+        }
+    }
 }
 
 @Composable

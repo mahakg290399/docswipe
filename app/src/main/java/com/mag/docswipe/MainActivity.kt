@@ -59,6 +59,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -738,9 +739,18 @@ private fun SettingsScreen(model: DocSwipeViewModel, onBack: () -> Unit, onScan:
     Scaffold(topBar = { TopAppBar(title = { Text("Settings") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back") } }) }) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Scan hidden folders", style = MaterialTheme.typography.titleMedium)
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(if (model.includeHidden) "Yes" else "No")
-                OutlinedButton(onClick = { model.setHidden(!model.includeHidden); onScan() }) { Text("Change and rescan") }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text(if (model.includeHidden) "Enabled" else "Disabled", color = if (model.includeHidden) Color(0xFF2E7D32) else MaterialTheme.colorScheme.onSurfaceVariant)
+                Switch(
+                    checked = model.includeHidden,
+                    onCheckedChange = { enabled -> model.setHidden(enabled); onScan() },
+                    colors = androidx.compose.material3.SwitchDefaults.colors(
+                        checkedThumbColor = Color.White,
+                        checkedTrackColor = Color(0xFF43A047),
+                        uncheckedThumbColor = Color(0xFFE0E0E0),
+                        uncheckedTrackColor = Color(0xFF9E9E9E)
+                    )
+                )
             }
         }
     }

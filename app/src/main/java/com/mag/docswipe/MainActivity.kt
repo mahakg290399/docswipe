@@ -190,6 +190,13 @@ class DocSwipeViewModel(application: android.app.Application) : AndroidViewModel
         if (deck.isEmpty() && !reviewingSkipped && db.hasSkipped(doc.month)) skippedPrompt = true
         refresh()
     }
+    fun undo(doc: Document) {
+        db.setStatus(doc.id, doc.status)
+        deferredSkippedIds -= doc.id
+        deck = db.documents(doc.month, includeSkipped = reviewingSkipped)
+            .filterNot { it.id in deferredSkippedIds }
+        refresh()
+    }
     fun restore(doc: Document) { db.setStatus(doc.id, Triage.UNREVIEWED); staged = db.staged(doc.month); refresh() }
 
     fun deleteStaged(month: String) {
@@ -435,7 +442,7 @@ private fun AllCaughtUp() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DeckScreen(model: DocSwipeViewModel, month: String, onBack: () -> Unit, onReview: () -> Unit) {
-    var undo by remember { mutableStateOf<Document?>(null) }
+    var undoStack by remember(month) { mutableStateOf<List<Document>>(emptyList()) }
     var showCompletionDialog by remember(month) { mutableStateOf(false) }
     var showTutorial by remember(month) { mutableStateOf(!model.tutorialShown(month)) }
     val totalDocuments = model.totalDocuments(month)
@@ -456,10 +463,12 @@ private fun DeckScreen(model: DocSwipeViewModel, month: String, onBack: () -> Un
     }, bottomBar = {
         Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 8.dp, shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 15.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                ActionButton(Icons.Default.Delete, "Delete", MaterialTheme.colorScheme.error) { active?.let { undo = it; model.act(it, Triage.STAGED_DELETE) } }
-                ActionButton(Icons.Default.Undo, "Undo", MaterialTheme.colorScheme.surfaceVariant) { undo?.let { model.act(it, Triage.UNREVIEWED); undo = null } }
-                ActionButton(Icons.Default.SkipNext, "Skip", MaterialTheme.colorScheme.surfaceVariant) { active?.let { undo = it; model.act(it, Triage.SKIPPED) } }
-                ActionButton(Icons.Default.Check, "Keep", MaterialTheme.colorScheme.primary) { active?.let { undo = it; model.act(it, Triage.KEEP) } }
+                ActionButton(Icons.Default.Delete, "Delete", MaterialTheme.colorScheme.error) { active?.let { undoStack = undoStack + it; model.act(it, Triage.STAGED_DELETE) } }
+                ActionButton(Icons.Default.Undo, "Undo", MaterialTheme.colorScheme.surfaceVariant) {
+                    undoStack.lastOrNull()?.let { previous -> model.undo(previous); undoStack = undoStack.dropLast(1) }
+                }
+                ActionButton(Icons.Default.SkipNext, "Skip", MaterialTheme.colorScheme.surfaceVariant) { active?.let { undoStack = undoStack + it; model.act(it, Triage.SKIPPED) } }
+                ActionButton(Icons.Default.Check, "Keep", MaterialTheme.colorScheme.primary) { active?.let { undoStack = undoStack + it; model.act(it, Triage.KEEP) } }
             }
         }
     }) { padding ->
@@ -470,7 +479,7 @@ private fun DeckScreen(model: DocSwipeViewModel, month: String, onBack: () -> Un
             }
         }
         else Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp)) {
-            DocumentCard(active, Modifier.weight(1f).fillMaxWidth(), onLeft = { undo = active; model.act(active, Triage.STAGED_DELETE) }, onRight = { undo = active; model.act(active, Triage.KEEP) })
+            DocumentCard(active, Modifier.weight(1f).fillMaxWidth(), onLeft = { undoStack = undoStack + active; model.act(active, Triage.STAGED_DELETE) }, onRight = { undoStack = undoStack + active; model.act(active, Triage.KEEP) })
             Spacer(Modifier.height(12.dp))
         }
     }

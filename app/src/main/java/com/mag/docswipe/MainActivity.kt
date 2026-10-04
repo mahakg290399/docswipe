@@ -532,6 +532,20 @@ private fun DocumentCard(document: Document, modifier: Modifier, onLeft: () -> U
         Box(Modifier.fillMaxSize()) {
             DocumentViewer(document, Modifier.fillMaxSize())
             SwipeActionHint(offset)
+            if (document.original) {
+                Surface(
+                    Modifier.align(Alignment.TopEnd).padding(12.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text(
+                        "ORIGINAL",
+                        Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+            }
         }
     }
 }

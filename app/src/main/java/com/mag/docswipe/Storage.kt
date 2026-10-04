@@ -127,7 +127,6 @@ class DocSwipeDatabase(context: Context) : SQLiteOpenHelper(context, "docswipe.d
 }
 
 class StorageScanner(private val database: DocSwipeDatabase) {
-    private val extensions = setOf("pdf", "docx", "xlsx", "pptx", "txt", "csv")
     private val monthFormat = SimpleDateFormat("yyyy-MM", Locale.ROOT)
 
     suspend fun scan(includeHidden: Boolean) = withContext(Dispatchers.IO) {
@@ -173,12 +172,12 @@ class StorageScanner(private val database: DocSwipeDatabase) {
 
     private fun walk(dir: File, includeHidden: Boolean, output: MutableList<Document>) {
         if (!dir.exists() || !dir.isDirectory || !dir.canRead()) return
-        if (dir.name == "Android" || dir.name.equals("data", true) || dir.name.equals("obb", true)) return
-        if (!includeHidden && dir.name.startsWith(".")) return
+        if (DocumentRules.isExcludedSystemDirectory(dir.name)) return
+        if (!includeHidden && DocumentRules.isHiddenDirectory(dir.name)) return
         val children = try { dir.listFiles() ?: return } catch (_: SecurityException) { return }
         children.forEach { file ->
             if (file.isDirectory) walk(file, includeHidden, output)
-            else if (!file.isSymbolicLink() && file.length() > 0 && file.extension.lowercase(Locale.ROOT) in extensions) {
+            else if (!file.isSymbolicLink() && DocumentRules.isSupportedFile(file.name, file.length())) {
                 val modified = file.lastModified()
                 output += Document(UUID.nameUUIDFromBytes(file.absolutePath.toByteArray()).toString(), file.absolutePath, file.name, file.extension.lowercase(Locale.ROOT), file.length(), modified, monthFormat.format(Date(modified)), Triage.UNREVIEWED)
             }

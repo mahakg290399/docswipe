@@ -45,6 +45,7 @@ dependencies {
     implementation("com.github.pcloud:pdfium-core:2.1.0")
     implementation("app.opendocument:odr-core-android:6.7.1")
     debugImplementation("androidx.compose.ui:ui-tooling")
+    testImplementation("junit:junit:4.13.2")
 }
 
 // OpenDocument.core declares API 36 metadata, but its Android bindings do not use API 36 calls.

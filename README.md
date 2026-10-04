@@ -1,6 +1,6 @@
 # DocSwipe
 
-DocSwipe is an offline Android document triage app. The current implementation is the first runnable vertical slice:
+DocSwipe is an offline Android document triage app for reviewing, keeping, skipping, and permanently deleting local documents.
 
 - Android 14+ / portrait-only
 - package `com.mag.docswipe`
@@ -9,13 +9,27 @@ DocSwipe is an offline Android document triage app. The current implementation i
 - supported-file filtering
 - exact duplicate grouping with SHA-256 confirmation
 - Compose home timeline and swipe deck
-- PDF first-page preview and TXT/CSV preview
+- PDF preview with password handling and display-sized rendering
+- In-app DOCX/XLSX/PPTX rendering plus TXT/CSV preview
 - keep, skip, delete-stage, undo, review, permanent deletion, partial-failure tracking, and retry
 
-## Build
+## Build locally
 
-Open the repository in Android Studio and run the `app` configuration on an Android 14+ emulator or device. The workspace currently has no Android SDK or Gradle installation available to the agent, so APK compilation still needs to be performed in Android Studio or a machine with the Android toolchain installed.
+Open the repository in Android Studio and run the `app` configuration on an Android 14+ emulator or device.
 
-## Current implementation boundary
+From a machine with Android SDK 35 and Java 17 installed:
 
-Office files are discovered and included in the data model, but the viewer currently uses the lightweight text-preview path. Full visual DOCX/XLSX/PPTX rendering is the next implementation spike and should be added behind the renderer boundary before calling the app stable.
+```bash
+./gradlew testDebugUnitTest
+./gradlew assembleDebug
+```
+
+The APK is written to `app/build/outputs/apk/debug/app-debug.apk`.
+
+## GitHub downloads and CI
+
+Every push and pull request runs the unit tests and debug build through GitHub Actions. Each successful run uploads a 30-day workflow artifact.
+
+Pushes to `main` also update the public rolling `latest` prerelease with the APK:
+
+<https://github.com/mahakg290399/docswipe/releases/tag/latest>

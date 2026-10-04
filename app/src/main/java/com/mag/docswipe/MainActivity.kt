@@ -430,8 +430,19 @@ private fun HomeScreen(model: DocSwipeViewModel, onOpen: (String) -> Unit, onRes
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text("Completed (${completedMonths.size})", style = MaterialTheme.typography.titleLarge)
-                    IconButton(onClick = { completedExpanded = !completedExpanded }) {
-                        Icon(if (completedExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, "Toggle completed folders")
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box {
+                            IconButton(onClick = { sortMenuOpen = true }) { Icon(Icons.Default.Sort, "Sort completed folders") }
+                            DropdownMenu(expanded = sortMenuOpen, onDismissRequest = { sortMenuOpen = false }) {
+                                DropdownMenuItem(text = { Text("Date: oldest first") }, onClick = { sortMode = HomeSort.DATE_OLDEST; sortMenuOpen = false })
+                                DropdownMenuItem(text = { Text("Date: newest first") }, onClick = { sortMode = HomeSort.DATE_NEWEST; sortMenuOpen = false })
+                                DropdownMenuItem(text = { Text("Files: fewest first") }, onClick = { sortMode = HomeSort.FILES_FEWEST; sortMenuOpen = false })
+                                DropdownMenuItem(text = { Text("Files: most first") }, onClick = { sortMode = HomeSort.FILES_MOST; sortMenuOpen = false })
+                            }
+                        }
+                        IconButton(onClick = { completedExpanded = !completedExpanded }) {
+                            Icon(if (completedExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, "Toggle completed folders")
+                        }
                     }
                 }
             }

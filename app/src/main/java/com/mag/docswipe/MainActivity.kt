@@ -41,6 +41,8 @@ import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -317,18 +319,21 @@ private fun contextPrefs(model: DocSwipeViewModel) = model.getApplication<DocSwi
 private fun HomeScreen(model: DocSwipeViewModel, onOpen: (String) -> Unit, onSettings: () -> Unit, onScan: () -> Unit) {
     var sortMenuOpen by remember { mutableStateOf(false) }
     var sortMode by remember { mutableStateOf(HomeSort.DATE_OLDEST) }
+    var inProgressExpanded by remember { mutableStateOf(true) }
+    var completedExpanded by remember { mutableStateOf(true) }
     val reviewed = model.months.sumOf { it.count - it.pending }
     val total = model.months.sumOf { it.count }
     val progress = if (total == 0) 0f else reviewed.toFloat() / total
     val sortedMonths = remember(model.months, sortMode) {
-        val pendingMonths = model.months.filter { it.pending > 0 }
         when (sortMode) {
-            HomeSort.DATE_OLDEST -> pendingMonths.sortedBy { it.month }
-            HomeSort.DATE_NEWEST -> pendingMonths.sortedByDescending { it.month }
-            HomeSort.FILES_FEWEST -> pendingMonths.sortedWith(compareBy<MonthSummary> { it.count }.thenBy { it.month })
-            HomeSort.FILES_MOST -> pendingMonths.sortedWith(compareByDescending<MonthSummary> { it.count }.thenBy { it.month })
+            HomeSort.DATE_OLDEST -> model.months.sortedBy { it.month }
+            HomeSort.DATE_NEWEST -> model.months.sortedByDescending { it.month }
+            HomeSort.FILES_FEWEST -> model.months.sortedWith(compareBy<MonthSummary> { it.count }.thenBy { it.month })
+            HomeSort.FILES_MOST -> model.months.sortedWith(compareByDescending<MonthSummary> { it.count }.thenBy { it.month })
         }
     }
+    val inProgressMonths = sortedMonths.filter { it.pending > 0 }
+    val completedMonths = sortedMonths.filter { it.pending == 0 }
 
     Scaffold(containerColor = MaterialTheme.colorScheme.background) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding).padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -367,23 +372,47 @@ private fun HomeScreen(model: DocSwipeViewModel, onOpen: (String) -> Unit, onSet
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("In progress", style = MaterialTheme.typography.titleLarge)
-                    Box {
-                        IconButton(onClick = { sortMenuOpen = true }) { Icon(Icons.Default.Sort, "Sort") }
-                        DropdownMenu(expanded = sortMenuOpen, onDismissRequest = { sortMenuOpen = false }) {
-                            DropdownMenuItem(text = { Text("Date: oldest first") }, onClick = { sortMode = HomeSort.DATE_OLDEST; sortMenuOpen = false })
-                            DropdownMenuItem(text = { Text("Date: newest first") }, onClick = { sortMode = HomeSort.DATE_NEWEST; sortMenuOpen = false })
-                            DropdownMenuItem(text = { Text("Files: fewest first") }, onClick = { sortMode = HomeSort.FILES_FEWEST; sortMenuOpen = false })
-                            DropdownMenuItem(text = { Text("Files: most first") }, onClick = { sortMode = HomeSort.FILES_MOST; sortMenuOpen = false })
+                    Text("In progress (${inProgressMonths.size})", style = MaterialTheme.typography.titleLarge)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box {
+                            IconButton(onClick = { sortMenuOpen = true }) { Icon(Icons.Default.Sort, "Sort") }
+                            DropdownMenu(expanded = sortMenuOpen, onDismissRequest = { sortMenuOpen = false }) {
+                                DropdownMenuItem(text = { Text("Date: oldest first") }, onClick = { sortMode = HomeSort.DATE_OLDEST; sortMenuOpen = false })
+                                DropdownMenuItem(text = { Text("Date: newest first") }, onClick = { sortMode = HomeSort.DATE_NEWEST; sortMenuOpen = false })
+                                DropdownMenuItem(text = { Text("Files: fewest first") }, onClick = { sortMode = HomeSort.FILES_FEWEST; sortMenuOpen = false })
+                                DropdownMenuItem(text = { Text("Files: most first") }, onClick = { sortMode = HomeSort.FILES_MOST; sortMenuOpen = false })
+                            }
+                        }
+                        IconButton(onClick = { inProgressExpanded = !inProgressExpanded }) {
+                            Icon(if (inProgressExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, "Toggle in-progress folders")
                         }
                     }
                 }
             }
-            if (sortedMonths.isEmpty() && !model.scanning) item {
-                if (model.months.isEmpty()) EmptyState() else AllCaughtUp()
+            if (inProgressExpanded) {
+                if (inProgressMonths.isEmpty() && !model.scanning) item {
+                    if (model.months.isEmpty()) EmptyState() else AllCaughtUp()
+                }
+                items(inProgressMonths, key = { it.month }) { month ->
+                    MonthCard(month, onClick = { onOpen(month.month) })
+                }
             }
-            items(sortedMonths, key = { it.month }) { month ->
-                MonthCard(month, onClick = { onOpen(month.month) })
+            item {
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Completed (${completedMonths.size})", style = MaterialTheme.typography.titleLarge)
+                    IconButton(onClick = { completedExpanded = !completedExpanded }) {
+                        Icon(if (completedExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, "Toggle completed folders")
+                    }
+                }
+            }
+            if (completedExpanded) {
+                items(completedMonths, key = { it.month }) { month ->
+                    MonthCard(month, onClick = { onOpen(month.month) })
+                }
             }
             item {
                 Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface, tonalElevation = 1.dp) {

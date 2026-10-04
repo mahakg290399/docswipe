@@ -129,6 +129,7 @@ class DocSwipeViewModel(application: android.app.Application) : AndroidViewModel
     fun openMonth(month: String) { reviewingSkipped = false; skippedPrompt = false; deck = db.documents(month) }
     fun reviewSkipped(month: String) { reviewingSkipped = true; skippedPrompt = false; deck = db.documents(month, includeSkipped = true) }
     fun leaveSkipped() { skippedPrompt = false; deck = emptyList() }
+    fun stagedCount(month: String): Int = db.staged(month).size
     fun openReview(month: String) { staged = db.staged(month) }
     fun act(doc: Document, action: Triage) {
         db.setStatus(doc.id, action)
@@ -340,23 +341,47 @@ private fun EmptyState() {
 @Composable
 private fun DeckScreen(model: DocSwipeViewModel, month: String, onBack: () -> Unit, onReview: () -> Unit) {
     var undo by remember { mutableStateOf<Document?>(null) }
+    var showCompletionDialog by remember(month) { mutableStateOf(false) }
     val active = model.deck.firstOrNull()
     Scaffold(containerColor = MaterialTheme.colorScheme.background, topBar = { TopAppBar(title = { Text(month) }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back") } }, actions = { TextButton(onClick = onReview) { Text("Review") } }) }, bottomBar = {
         Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 8.dp, shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 15.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                ActionButton(Icons.Default.Delete, "Delete", MaterialTheme.colorScheme.error) { active?.let { undo = it; model.act(it, Triage.STAGED_DELETE) } }
                 ActionButton(Icons.Default.Undo, "Undo", MaterialTheme.colorScheme.surfaceVariant) { undo?.let { model.act(it, Triage.UNREVIEWED); undo = null } }
                 ActionButton(Icons.Default.SkipNext, "Skip", MaterialTheme.colorScheme.surfaceVariant) { active?.let { undo = it; model.act(it, Triage.SKIPPED) } }
-                ActionButton(Icons.Default.Delete, "Delete", MaterialTheme.colorScheme.error) { active?.let { undo = it; model.act(it, Triage.STAGED_DELETE) } }
                 ActionButton(Icons.Default.Check, "Keep", MaterialTheme.colorScheme.primary) { active?.let { undo = it; model.act(it, Triage.KEEP) } }
             }
         }
     }) { padding ->
-        if (active == null) Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) { Text("Month review complete") }
+        if (active == null) Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Month review complete", style = MaterialTheme.typography.titleLarge)
+                Button(onClick = { showCompletionDialog = true }) { Text("What next?") }
+            }
+        }
         else Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp)) {
             Text("${model.deck.size} documents left", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 10.dp, bottom = 8.dp))
             DocumentCard(active, Modifier.weight(1f).fillMaxWidth(), onLeft = { undo = active; model.act(active, Triage.STAGED_DELETE) }, onRight = { undo = active; model.act(active, Triage.KEEP) })
             Spacer(Modifier.height(12.dp))
         }
+    }
+
+    LaunchedEffect(active, month) {
+        if (active == null && model.stagedCount(month) > 0) showCompletionDialog = true
+    }
+    if (showCompletionDialog) {
+        val count = model.stagedCount(month)
+        AlertDialog(
+            onDismissRequest = { showCompletionDialog = false },
+            title = { Text("Review complete") },
+            text = { Text("You selected $count document${if (count == 1) "" else "s"} for deletion. What would you like to do?") },
+            confirmButton = {
+                TextButton(onClick = { showCompletionDialog = false; onReview() }) { Text("Review deletion list") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCompletionDialog = false; model.deleteStaged(month); onBack() }) { Text("Delete selected") }
+            }
+        )
     }
 }
 

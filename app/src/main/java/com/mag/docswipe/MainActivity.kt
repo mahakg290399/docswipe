@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
@@ -33,12 +34,15 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -56,6 +60,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -74,7 +80,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { DocSwipeApp(model) }
+        setContent { DocSwipeTheme { DocSwipeApp(model) } }
     }
 
     override fun onResume() {
@@ -238,34 +244,94 @@ private fun contextPrefs(model: DocSwipeViewModel) = model.getApplication<DocSwi
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun HomeScreen(model: DocSwipeViewModel, onOpen: (String) -> Unit, onSettings: () -> Unit, onScan: () -> Unit) {
-    Scaffold(topBar = { TopAppBar(title = { Text("DocSwipe") }, actions = {
-        IconButton(onClick = onScan) { Icon(Icons.Default.Refresh, "Rescan") }
-        IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, "Settings") }
-    }) }) { padding ->
-        LazyColumn(Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (model.scanning) item { Text("Scanning local documents…") }
-            if (model.months.isEmpty() && !model.scanning) item { Text("No supported documents found.") }
-            items(model.months, key = { it.month }) { month ->
-                Card(onClick = { onOpen(month.month) }, modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text(month.month, style = MaterialTheme.typography.titleLarge)
-                        Text("${month.count} files · ${formatBytes(month.bytes)}")
-                        if (month.pending > 0) Text("Pending review", color = MaterialTheme.colorScheme.primary)
+    val reviewed = model.months.sumOf { it.count - it.pending }
+    val total = model.months.sumOf { it.count }
+    val progress = if (total == 0) 0f else reviewed.toFloat() / total
+
+    Scaffold(containerColor = MaterialTheme.colorScheme.background) { padding ->
+        LazyColumn(Modifier.fillMaxSize().padding(padding).padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            item {
+                Row(Modifier.fillMaxWidth().padding(top = 18.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Column {
+                        Text("DocSwipe", style = MaterialTheme.typography.headlineMedium)
+                        Text("A calmer way to clear your documents", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Row {
+                        IconButton(onClick = onScan) { Icon(Icons.Default.Refresh, "Rescan") }
+                        IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, "Settings") }
                     }
                 }
             }
             item {
-                Text("Failed Deleted Files (${model.failed.size})", style = MaterialTheme.typography.titleMedium)
-                model.failed.forEach { failure ->
-                    Card(Modifier.fillMaxWidth().padding(top = 6.dp)) {
-                        Column(Modifier.padding(12.dp)) {
-                            Text(failure.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(failure.path, style = MaterialTheme.typography.bodySmall)
-                            TextButton(onClick = { model.retry(failure) }) { Text("Retry") }
+                Surface(shape = RoundedCornerShape(26.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+                    Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
+                            Column {
+                                Text("Your progress", color = MaterialTheme.colorScheme.onPrimaryContainer)
+                                Text("${(progress * 100).toInt()}% reviewed", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                            }
+                            Text("$reviewed / $total", color = MaterialTheme.colorScheme.onPrimaryContainer)
+                        }
+                        LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.primary, trackColor = Color.White.copy(alpha = .65f))
+                        Button(onClick = { model.months.firstOrNull { it.pending > 0 }?.let { onOpen(it.month) } }, enabled = model.months.any { it.pending > 0 }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) {
+                            Text(if (model.scanning) "Scanning…" else "Start cleaning")
                         }
                     }
                 }
             }
+            item { Text("In progress", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 4.dp)) }
+            if (model.months.isEmpty() && !model.scanning) item { EmptyState() }
+            items(model.months, key = { it.month }) { month ->
+                MonthCard(month, onClick = { onOpen(month.month) })
+            }
+            item {
+                Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface, tonalElevation = 1.dp) {
+                    Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Text("Failed Deleted Files", style = MaterialTheme.typography.titleMedium)
+                            Text("${model.failed.size}", color = MaterialTheme.colorScheme.error)
+                        }
+                        model.failed.forEach { failure ->
+                            Column(Modifier.padding(top = 10.dp)) {
+                                Text(failure.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(failure.path, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                TextButton(onClick = { model.retry(failure) }) { Text("Retry") }
+                            }
+                        }
+                    }
+                }
+            }
+            item { Spacer(Modifier.height(18.dp)) }
+        }
+    }
+}
+
+@Composable
+private fun MonthCard(month: MonthSummary, onClick: () -> Unit) {
+    val reviewed = month.count - month.pending
+    val progress = if (month.count == 0) 0f else reviewed.toFloat() / month.count
+    Card(onClick = onClick, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(22.dp)) {
+        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Surface(Modifier.size(48.dp), shape = RoundedCornerShape(15.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+                Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Folder, "Month", tint = MaterialTheme.colorScheme.primary) }
+            }
+            Column(Modifier.weight(1f).padding(horizontal = 14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text(month.month, style = MaterialTheme.typography.titleMedium)
+                Text("$reviewed of ${month.count} reviewed · ${formatBytes(month.bytes)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.primary, trackColor = MaterialTheme.colorScheme.surfaceVariant)
+                if (month.pending > 0) Text("Pending review", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+            }
+            Icon(Icons.Default.ChevronRight, "Open month", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun EmptyState() {
+    Surface(shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.surface) {
+        Column(Modifier.fillMaxWidth().padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("No documents yet", style = MaterialTheme.typography.titleMedium)
+            Text("Scan your device to find PDFs, Office files, TXT, and CSV documents.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -275,23 +341,37 @@ private fun HomeScreen(model: DocSwipeViewModel, onOpen: (String) -> Unit, onSet
 private fun DeckScreen(model: DocSwipeViewModel, month: String, onBack: () -> Unit, onReview: () -> Unit) {
     var undo by remember { mutableStateOf<Document?>(null) }
     val active = model.deck.firstOrNull()
-    Scaffold(topBar = { TopAppBar(title = { Text(month) }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back") } }, actions = { TextButton(onClick = onReview) { Text("Review") } }) }, bottomBar = {
-        Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-            IconButton(onClick = { undo?.let { model.act(it, Triage.UNREVIEWED); undo = null } }) { Icon(Icons.Default.Undo, "Undo") }
-            IconButton(onClick = { active?.let { undo = it; model.act(it, Triage.SKIPPED) } }) { Icon(Icons.Default.SkipNext, "Skip") }
-            IconButton(onClick = { active?.let { undo = it; model.act(it, Triage.STAGED_DELETE) } }) { Icon(Icons.Default.Delete, "Delete") }
-            IconButton(onClick = { active?.let { undo = it; model.act(it, Triage.KEEP) } }) { Icon(Icons.Default.Check, "Keep") }
+    Scaffold(containerColor = MaterialTheme.colorScheme.background, topBar = { TopAppBar(title = { Text(month) }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back") } }, actions = { TextButton(onClick = onReview) { Text("Review") } }) }, bottomBar = {
+        Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 8.dp, shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 15.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                ActionButton(Icons.Default.Undo, "Undo", MaterialTheme.colorScheme.surfaceVariant) { undo?.let { model.act(it, Triage.UNREVIEWED); undo = null } }
+                ActionButton(Icons.Default.SkipNext, "Skip", MaterialTheme.colorScheme.surfaceVariant) { active?.let { undo = it; model.act(it, Triage.SKIPPED) } }
+                ActionButton(Icons.Default.Delete, "Delete", MaterialTheme.colorScheme.error) { active?.let { undo = it; model.act(it, Triage.STAGED_DELETE) } }
+                ActionButton(Icons.Default.Check, "Keep", MaterialTheme.colorScheme.primary) { active?.let { undo = it; model.act(it, Triage.KEEP) } }
+            }
         }
     }) { padding ->
         if (active == null) Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) { Text("Month review complete") }
-        else DocumentCard(active, Modifier.fillMaxSize().padding(padding).padding(12.dp), onLeft = { undo = active; model.act(active, Triage.STAGED_DELETE) }, onRight = { undo = active; model.act(active, Triage.KEEP) })
+        else Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp)) {
+            Text("${model.deck.size} documents left", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 10.dp, bottom = 8.dp))
+            DocumentCard(active, Modifier.weight(1f).fillMaxWidth(), onLeft = { undo = active; model.act(active, Triage.STAGED_DELETE) }, onRight = { undo = active; model.act(active, Triage.KEEP) })
+            Spacer(Modifier.height(12.dp))
+        }
+    }
+}
+
+@Composable
+private fun ActionButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, color: Color, onClick: () -> Unit) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        IconButton(onClick = onClick, modifier = Modifier.size(54.dp).background(color, CircleShape)) { Icon(icon, label, tint = if (color == MaterialTheme.colorScheme.surfaceVariant) MaterialTheme.colorScheme.onSurface else Color.White) }
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
 @Composable
 private fun DocumentCard(document: Document, modifier: Modifier, onLeft: () -> Unit, onRight: () -> Unit) {
     var offset by remember(document.id) { mutableFloatStateOf(0f) }
-    Card(modifier.pointerInput(document.id) {
+    Card(modifier.graphicsLayer { translationX = offset; rotationZ = offset / 34f }.pointerInput(document.id) {
         detectDragGestures(onDragEnd = {
             when { offset < -180f -> onLeft(); offset > 180f -> onRight() }
             offset = 0f

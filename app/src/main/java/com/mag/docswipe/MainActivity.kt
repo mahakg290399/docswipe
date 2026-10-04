@@ -11,6 +11,8 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.gestures.rememberTransformableState
@@ -28,6 +30,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -54,11 +57,16 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -66,6 +74,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.changedToUp
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChangeIgnoreConsumed
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
@@ -75,6 +86,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
 import java.io.File
 import java.text.DecimalFormat
 
@@ -502,25 +514,65 @@ private fun DocumentViewer(document: Document, modifier: Modifier) {
 @Composable
 private fun PdfPreview(path: String, modifier: Modifier) {
     var pages by remember(path) { mutableStateOf<List<android.graphics.Bitmap>>(emptyList()) }
+    var totalPages by remember(path) { mutableStateOf(0) }
+    val listState = rememberLazyListState()
+    val pull = remember(path) { Animatable(0f) }
+    val scope = rememberCoroutineScope()
+    val currentPage by remember { derivedStateOf { (listState.firstVisibleItemIndex + 1).coerceAtMost(totalPages.coerceAtLeast(1)) } }
     LaunchedEffect(path) {
-        pages = withContext(Dispatchers.IO) {
+        val loaded = withContext(Dispatchers.IO) {
             try {
                 val descriptor = android.os.ParcelFileDescriptor.open(File(path), android.os.ParcelFileDescriptor.MODE_READ_ONLY)
                 val renderer = android.graphics.pdf.PdfRenderer(descriptor)
-                val result = (0 until minOf(renderer.pageCount, 10)).map { index ->
+                val pageCount = renderer.pageCount
+                val result = (0 until minOf(pageCount, 10)).map { index ->
                     renderer.openPage(index).let { page ->
                         val bitmap = android.graphics.Bitmap.createBitmap(page.width, page.height, android.graphics.Bitmap.Config.ARGB_8888)
                         page.render(bitmap, null, null, android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
                         page.close(); bitmap
                     }
                 }
-                renderer.close(); descriptor.close(); result
-            } catch (_: Exception) { emptyList() }
+                renderer.close(); descriptor.close(); pageCount to result
+            } catch (_: Exception) { 0 to emptyList() }
         }
+        totalPages = loaded.first
+        pages = loaded.second
     }
-    if (pages.isEmpty()) Text("Loading PDF preview…") else LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        itemsIndexed(pages) { index, page ->
-            ZoomablePage(page, index)
+    if (pages.isEmpty()) Text("Loading PDF preview…") else Box(modifier.pointerInput(path, totalPages) {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false)
+            var totalY = 0f
+            while (true) {
+                val event = awaitPointerEvent()
+                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                if (change.changedToUp()) break
+                val dy = change.positionChangeIgnoreConsumed().y
+                totalY += dy
+                val atStart = listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
+                val atEnd = !listState.canScrollForward
+                val pullingStart = atStart && totalY > 0f
+                val pullingEnd = atEnd && totalY < 0f
+                if (pullingStart || pullingEnd) {
+                    val value = (totalY * 0.35f).coerceIn(-72f, 72f)
+                    scope.launch { pull.snapTo(value) }
+                }
+            }
+            scope.launch { pull.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow)) }
+        }
+    }) {
+        LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            itemsIndexed(pages) { index, page ->
+                ZoomablePage(page, index)
+            }
+        }
+        Surface(Modifier.align(Alignment.TopEnd).padding(8.dp), color = Color(0xEE18221E), shape = RoundedCornerShape(12.dp)) {
+            Text("Page $currentPage of $totalPages", Modifier.padding(horizontal = 10.dp, vertical = 6.dp), color = Color.White, style = MaterialTheme.typography.labelMedium)
+        }
+        if (pull.value != 0f) {
+            val atStart = pull.value > 0f
+            Surface(Modifier.align(if (atStart) Alignment.TopCenter else Alignment.BottomCenter).padding(12.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = 0.92f), shape = RoundedCornerShape(18.dp)) {
+                Text(if (atStart) "Start of document" else "End of document", Modifier.padding(horizontal = 14.dp, vertical = 9.dp), color = Color.White, style = MaterialTheme.typography.labelLarge)
+            }
         }
     }
 }

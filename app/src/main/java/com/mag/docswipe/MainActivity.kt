@@ -77,8 +77,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.changedToUp
+import androidx.compose.ui.input.pointer.consumePositionChange
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.positionChangeIgnoreConsumed
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
@@ -91,6 +91,9 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import java.io.File
 import java.text.DecimalFormat
+import com.shockwave.pdfium.PdfDocument
+import com.shockwave.pdfium.PdfPasswordException
+import com.shockwave.pdfium.PdfiumCore
 
 class MainActivity : ComponentActivity() {
     private val model by viewModels<DocSwipeViewModel>()
@@ -517,90 +520,110 @@ private fun DocumentViewer(document: Document, modifier: Modifier) {
 private fun PdfPreview(path: String, modifier: Modifier) {
     var totalPages by remember(path) { mutableStateOf(0) }
     var loadError by remember(path) { mutableStateOf<String?>(null) }
+    var passwordRequired by remember(path) { mutableStateOf(false) }
+    var passwordError by remember(path) { mutableStateOf(false) }
+    var password by remember(path) { mutableStateOf("") }
+    var submittedPassword by remember(path) { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
-    val pull = remember(path) { Animatable(0f) }
-    val scope = rememberCoroutineScope()
     val currentPage by remember { derivedStateOf { (listState.firstVisibleItemIndex + 1).coerceAtMost(totalPages.coerceAtLeast(1)) } }
-    LaunchedEffect(path) {
+    val context = LocalContext.current
+
+    LaunchedEffect(path, submittedPassword) {
         totalPages = 0
         loadError = null
+        passwordRequired = false
+        passwordError = false
         val result = withContext(Dispatchers.IO) {
+            var descriptor: android.os.ParcelFileDescriptor? = null
+            var document: PdfDocument? = null
             try {
-                val descriptor = android.os.ParcelFileDescriptor.open(File(path), android.os.ParcelFileDescriptor.MODE_READ_ONLY)
-                val renderer = android.graphics.pdf.PdfRenderer(descriptor)
-                val pageCount = renderer.pageCount
-                renderer.close(); descriptor.close(); pageCount
+                descriptor = android.os.ParcelFileDescriptor.open(File(path), android.os.ParcelFileDescriptor.MODE_READ_ONLY)
+                val core = PdfiumCore(context)
+                document = core.newDocument(descriptor, submittedPassword)
+                val pageCount = core.getPageCount(document!!)
+                core.closeDocument(document!!)
+                document = null
+                descriptor = null
+                PdfLoadResult.Ready(pageCount)
+            } catch (_: PdfPasswordException) {
+                PdfLoadResult.PasswordRequired
             } catch (error: Exception) {
                 Log.e("DocSwipe.Pdf", "Unable to open PDF: $path", error)
-                -1
+                PdfLoadResult.Error
+            } finally {
+                document?.let { runCatching { PdfiumCore(context).closeDocument(it) } }
+                descriptor?.let { runCatching { it.close() } }
             }
         }
-        if (result < 0) loadError = "This PDF could not be opened. It may be password-protected, corrupted, or unreadable."
-        else totalPages = result
+        when (result) {
+            PdfLoadResult.PasswordRequired -> {
+                passwordRequired = true
+                passwordError = submittedPassword != null
+            }
+            PdfLoadResult.Error -> loadError = if (submittedPassword == null) "This PDF could not be opened." else "Incorrect password or unreadable PDF."
+            is PdfLoadResult.Ready -> totalPages = result.pages
+        }
     }
-    if (loadError != null) {
+
+    if (passwordRequired) {
+        Surface(modifier, color = Color(0xFFFFF7F5), shape = RoundedCornerShape(16.dp)) {
+            Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Password required", style = MaterialTheme.typography.titleMedium)
+                Text(if (passwordError) "That password was not accepted. Try again." else "Enter the password to view this PDF.", color = if (passwordError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+                androidx.compose.material3.OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    singleLine = true,
+                    label = { Text("PDF password") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Button(onClick = { submittedPassword = password }, enabled = password.isNotEmpty()) { Text("Unlock PDF") }
+            }
+        }
+    } else if (loadError != null) {
         Surface(modifier, color = Color(0xFFFFF7F5), shape = RoundedCornerShape(16.dp)) {
             Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("PDF preview unavailable", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.error)
                 Text(loadError!!, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-    } else if (totalPages == 0) Text("Loading PDF preview…") else Box(modifier.pointerInput(path, totalPages) {
-        awaitEachGesture {
-            val down = awaitFirstDown(requireUnconsumed = false)
-            var totalY = 0f
-            while (true) {
-                val event = awaitPointerEvent()
-                val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                if (change.changedToUp()) break
-                val dy = change.positionChangeIgnoreConsumed().y
-                totalY += dy
-                val atStart = listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
-                val atEnd = !listState.canScrollForward
-                val pullingStart = atStart && totalY > 0f
-                val pullingEnd = atEnd && totalY < 0f
-                if (pullingStart || pullingEnd) {
-                    val value = (totalY * 0.35f).coerceIn(-72f, 72f)
-                    scope.launch { pull.snapTo(value) }
-                }
-            }
-            scope.launch { pull.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow)) }
-        }
-    }) {
+    } else if (totalPages == 0) Text("Loading PDF preview…") else Box(modifier) {
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             items(totalPages) { index ->
-                PdfPage(path, index)
+                PdfPage(path, index, submittedPassword)
             }
         }
         Surface(Modifier.align(Alignment.TopEnd).padding(8.dp), color = Color(0xEE18221E), shape = RoundedCornerShape(12.dp)) {
             Text("Page $currentPage of $totalPages", Modifier.padding(horizontal = 10.dp, vertical = 6.dp), color = Color.White, style = MaterialTheme.typography.labelMedium)
         }
-        if (pull.value != 0f) {
-            val atStart = pull.value > 0f
-            Surface(Modifier.align(if (atStart) Alignment.TopCenter else Alignment.BottomCenter).padding(12.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = 0.92f), shape = RoundedCornerShape(18.dp)) {
-                Text(if (atStart) "Start of document" else "End of document", Modifier.padding(horizontal = 14.dp, vertical = 9.dp), color = Color.White, style = MaterialTheme.typography.labelLarge)
-            }
-        }
     }
 }
 
 @Composable
-private fun PdfPage(path: String, index: Int) {
+private fun PdfPage(path: String, index: Int, password: String?) {
     var page by remember(path, index) { mutableStateOf<android.graphics.Bitmap?>(null) }
     var error by remember(path, index) { mutableStateOf(false) }
-    LaunchedEffect(path, index) {
+    val context = LocalContext.current
+    LaunchedEffect(path, index, password) {
         val loaded = withContext(Dispatchers.IO) {
+            var document: PdfDocument? = null
             try {
                 val descriptor = android.os.ParcelFileDescriptor.open(File(path), android.os.ParcelFileDescriptor.MODE_READ_ONLY)
-                val renderer = android.graphics.pdf.PdfRenderer(descriptor)
-                renderer.openPage(index).let { source ->
-                    val bitmap = android.graphics.Bitmap.createBitmap(source.width, source.height, android.graphics.Bitmap.Config.ARGB_8888)
-                    source.render(bitmap, null, null, android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                    source.close(); renderer.close(); descriptor.close(); bitmap
-                }
+                val core = PdfiumCore(context)
+                document = core.newDocument(descriptor, password)
+                core.openPage(document!!, index)
+                val width = core.getPageWidth(document!!, index)
+                val height = core.getPageHeight(document!!, index)
+                val bitmap = android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888)
+                core.renderPageBitmap(document!!, bitmap, index, 0, 0, width, height, true)
+                core.closeDocument(document!!)
+                document = null
+                bitmap
             } catch (exception: Exception) {
                 Log.e("DocSwipe.Pdf", "Unable to render page ${index + 1}: $path", exception)
                 null
+            } finally {
+                document?.let { runCatching { PdfiumCore(context).closeDocument(it) } }
             }
         }
         page = loaded
@@ -620,10 +643,37 @@ private fun PdfPage(path: String, index: Int) {
 @Composable
 private fun ZoomablePage(page: android.graphics.Bitmap, index: Int) {
     var scale by remember(index) { mutableFloatStateOf(1f) }
-    val transformState = rememberTransformableState { zoomChange, _, _ -> scale = (scale * zoomChange).coerceIn(1f, 3f) }
-    Surface(Modifier.fillMaxWidth().transformable(transformState).graphicsLayer { scaleX = scale; scaleY = scale }, color = Color.White, shape = RoundedCornerShape(4.dp)) {
+    Surface(Modifier.fillMaxWidth().pointerInput(index) {
+        awaitEachGesture {
+            awaitFirstDown(requireUnconsumed = false)
+            var previousDistance = 0f
+            while (true) {
+                val event = awaitPointerEvent()
+                val pointers = event.changes
+                if (pointers.all { it.changedToUp() }) break
+                if (pointers.size >= 2) {
+                    val first = pointers[0].position
+                    val second = pointers[1].position
+                    val dx = first.x - second.x
+                    val dy = first.y - second.y
+                    val distance = kotlin.math.sqrt(dx * dx + dy * dy)
+                    if (previousDistance > 0f) scale = (scale * (distance / previousDistance)).coerceIn(1f, 3f)
+                    previousDistance = distance
+                    pointers.forEach { it.consumePositionChange() }
+                } else {
+                    previousDistance = 0f
+                }
+            }
+        }
+    }.graphicsLayer { scaleX = scale; scaleY = scale }, color = Color.White, shape = RoundedCornerShape(4.dp)) {
         Image(page.asImageBitmap(), "PDF page ${index + 1}", Modifier.fillMaxWidth(), contentScale = ContentScale.FillWidth)
     }
+}
+
+private sealed interface PdfLoadResult {
+    data class Ready(val pages: Int) : PdfLoadResult
+    data object PasswordRequired : PdfLoadResult
+    data object Error : PdfLoadResult
 }
 
 @Composable

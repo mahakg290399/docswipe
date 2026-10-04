@@ -38,5 +38,6 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.core:core-ktx:1.15.0")
+    implementation("com.github.pcloud:pdfium-core:2.1.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

@@ -16,8 +16,6 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
-import androidx.compose.foundation.gestures.rememberTransformableState
-import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -762,9 +760,7 @@ private fun TextPreview(path: String, modifier: Modifier) {
             }.getOrElse { listOf("Preview unavailable") }
         }
     }
-    var scale by remember(path) { mutableFloatStateOf(1f) }
-    val transformState = rememberTransformableState { zoomChange, _, _ -> scale = (scale * zoomChange).coerceIn(1f, 3f) }
-    Box(modifier.transformable(transformState).graphicsLayer { scaleX = scale; scaleY = scale }) {
+    Box(modifier) {
         if (lines == null) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Loading text…", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         } else {

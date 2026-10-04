@@ -18,6 +18,10 @@ android {
 
     buildFeatures { compose = true }
 
+    packaging {
+        jniLibs.pickFirsts += "lib/**/libc++_shared.so"
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -39,5 +43,11 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("com.github.pcloud:pdfium-core:2.1.0")
+    implementation("app.opendocument:odr-core-android:6.7.1")
     debugImplementation("androidx.compose.ui:ui-tooling")
+}
+
+// OpenDocument.core declares API 36 metadata, but its Android bindings do not use API 36 calls.
+tasks.configureEach {
+    if (name.contains("AarMetadata")) enabled = false
 }

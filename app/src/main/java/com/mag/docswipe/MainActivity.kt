@@ -9,7 +9,6 @@ import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
-import androidx.core.content.FileProvider
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.Orientation
@@ -86,6 +85,7 @@ import androidx.compose.ui.input.pointer.consumePositionChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.AndroidViewModel
@@ -99,6 +99,12 @@ import java.text.DecimalFormat
 import com.shockwave.pdfium.PdfDocument
 import com.shockwave.pdfium.PdfPasswordException
 import com.shockwave.pdfium.PdfiumCore
+import app.opendocument.core.Html
+import app.opendocument.core.HtmlConfig
+import app.opendocument.core.Odr
+import app.opendocument.core.android.OdrAndroid
+import android.webkit.WebView
+import android.webkit.WebViewClient
 
 class MainActivity : ComponentActivity() {
     private val model by viewModels<DocSwipeViewModel>()
@@ -561,7 +567,7 @@ private fun DocumentViewer(document: Document, modifier: Modifier) {
         when (document.extension) {
             "pdf" -> PdfPreview(document.path, Modifier.fillMaxSize().padding(10.dp))
             "txt", "csv" -> TextPreview(document.path, Modifier.fillMaxSize().padding(14.dp))
-            else -> OfficePreview(document.path, document.extension, Modifier.fillMaxSize().padding(14.dp))
+            else -> OfficePreview(document.path, Modifier.fillMaxSize().padding(10.dp))
         }
     }
 }
@@ -737,27 +743,72 @@ private fun TextPreview(path: String, modifier: Modifier) {
 }
 
 @Composable
-private fun OfficePreview(path: String, extension: String, modifier: Modifier) {
+private fun OfficePreview(path: String, modifier: Modifier) {
     val context = LocalContext.current
-    val type = when (extension) {
-        "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        "xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        "pptx" -> "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-        else -> "application/octet-stream"
+    var renderedPath by remember(path) { mutableStateOf<String?>(null) }
+    var renderError by remember(path) { mutableStateOf<String?>(null) }
+    LaunchedEffect(path) {
+        renderedPath = null
+        renderError = null
+        val result = withContext(Dispatchers.IO) { renderOfficeDocument(context, path) }
+        if (result.startsWith("ERROR:")) renderError = result.removePrefix("ERROR:") else renderedPath = result
     }
-    Surface(modifier, color = Color(0xFFF7FAF8), shape = RoundedCornerShape(16.dp)) {
-        Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("Open original file", style = MaterialTheme.typography.titleMedium)
-            Text("DocSwipe will open this Office file in an installed compatible viewer so its original formatting, images, tables, and layout are preserved.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Button(onClick = {
-                val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", File(path))
-                val intent = Intent(Intent.ACTION_VIEW).apply {
-                    setDataAndType(uri, type)
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                }
-                context.startActivity(Intent.createChooser(intent, "Open with"))
-            }) { Text("Open file") }
+    when {
+        renderError != null -> Surface(modifier, color = Color(0xFFFFF7F5), shape = RoundedCornerShape(16.dp)) {
+            Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Office preview unavailable", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.error)
+                Text(renderError!!, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
+        renderedPath == null -> Box(modifier, contentAlignment = Alignment.Center) { Text("Rendering document…", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        else -> AndroidView(
+            modifier = modifier,
+            factory = { context ->
+                WebView(context).apply {
+                    settings.javaScriptEnabled = true
+                    settings.domStorageEnabled = true
+                    settings.allowFileAccess = true
+                    settings.allowFileAccessFromFileURLs = true
+                    settings.allowUniversalAccessFromFileURLs = false
+                    webViewClient = WebViewClient()
+                    setBackgroundColor(android.graphics.Color.WHITE)
+                }
+            },
+            update = { webView ->
+                if (webView.url != renderedPath) webView.loadUrl(renderedPath!!)
+            }
+        )
+    }
+}
+
+private fun renderOfficeDocument(context: android.content.Context, path: String): String {
+    return try {
+    OdrAndroid.init(context.applicationContext)
+    val output = File(context.cacheDir, "office-render/${File(path).nameWithoutExtension}-${File(path).lastModified()}").apply { mkdirs() }
+    val decoded = Odr.open(path)
+    val service = Html.translate(decoded, output.absolutePath, HtmlConfig().apply {
+        embedImages = true
+        embedShippedResources = true
+        formatHtml = true
+        viewportContent = "width=device-width, initial-scale=1.0"
+    })
+    val rendered = service.bringOffline(output.absolutePath)
+    val pages = rendered.pages()
+    if (pages.isEmpty()) "ERROR:The document did not contain a renderable page."
+    else {
+        val wrapper = File(output, "docswipe-wrapper.html")
+        wrapper.writeText("""
+        <!doctype html><html><head><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><style>
+        html,body{margin:0;padding:0;background:#eef2ef;}iframe{display:block;width:100%;min-height:100vh;border:0;margin:0 0 12px;background:white;}
+        </style></head><body>${pages.joinToString("") { "<iframe src=\"${File(it.path).toURI()}\"></iframe>" }}</body></html>
+        """.trimIndent())
+        service.close()
+        decoded.close()
+        wrapper.toURI().toString()
+    }
+    } catch (error: Exception) {
+        Log.e("DocSwipe.Office", "Unable to render Office document: $path", error)
+        "ERROR:${error.message ?: "The file could not be rendered."}"
     }
 }
 

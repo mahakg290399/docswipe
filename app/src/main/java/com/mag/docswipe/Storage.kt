@@ -75,7 +75,7 @@ class DocSwipeDatabase(context: Context) : SQLiteOpenHelper(context, "docswipe.d
     }
 
     fun months(): List<MonthSummary> = readableDatabase.rawQuery(
-        "SELECT month, COUNT(*), SUM(size), SUM(CASE WHEN status IN ('UNREVIEWED','SKIPPED','STAGED_DELETE') THEN 1 ELSE 0 END) FROM documents GROUP BY month ORDER BY month ASC", null
+        "SELECT month, COUNT(*), SUM(size), SUM(CASE WHEN status IN ('UNREVIEWED','SKIPPED') THEN 1 ELSE 0 END) FROM documents GROUP BY month ORDER BY month ASC", null
     ).use { c ->
         buildList { while (c.moveToNext()) add(MonthSummary(c.getString(0), c.getInt(1), c.getLong(2), c.getInt(3))) }
     }

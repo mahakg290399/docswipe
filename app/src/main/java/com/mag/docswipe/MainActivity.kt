@@ -146,7 +146,12 @@ class DocSwipeViewModel(application: android.app.Application) : AndroidViewModel
         getApplication<DocSwipeApplication>().getSharedPreferences("settings", 0).edit().putBoolean("hidden", value).apply()
     }
 
-    fun openMonth(month: String) { reviewingSkipped = false; skippedPrompt = false; deck = db.documents(month) }
+    fun openMonth(month: String) {
+        reviewingSkipped = false
+        skippedPrompt = false
+        deck = db.documents(month)
+        if (deck.isEmpty() && db.hasSkipped(month)) skippedPrompt = true
+    }
     fun reviewSkipped(month: String) { reviewingSkipped = true; skippedPrompt = false; deck = db.documents(month, includeSkipped = true) }
     fun leaveSkipped() { skippedPrompt = false; deck = emptyList() }
     fun stagedCount(month: String): Int = db.staged(month).size

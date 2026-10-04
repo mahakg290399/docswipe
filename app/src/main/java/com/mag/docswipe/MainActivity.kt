@@ -485,7 +485,11 @@ private fun DeckScreen(model: DocSwipeViewModel, month: String, onBack: () -> Un
         if (active == null) Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Month review complete", style = MaterialTheme.typography.titleLarge)
-                Button(onClick = { showCompletionDialog = true }) { Text("What next?") }
+                if (model.stagedCount(month) > 0) {
+                    Button(onClick = { showCompletionDialog = true }) { Text("What next?") }
+                } else {
+                    Button(onClick = onBack) { Text("Back to folders") }
+                }
             }
         }
         else Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp)) {
@@ -497,7 +501,7 @@ private fun DeckScreen(model: DocSwipeViewModel, month: String, onBack: () -> Un
     LaunchedEffect(active, month) {
         if (active == null && model.stagedCount(month) > 0) showCompletionDialog = true
     }
-    if (showCompletionDialog) {
+    if (showCompletionDialog && model.stagedCount(month) > 0) {
         val count = model.stagedCount(month)
         AlertDialog(
             onDismissRequest = { showCompletionDialog = false },
